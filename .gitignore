@@ -1,0 +1,3 @@
+# zig builds
+/.zig-cache
+/zig-out
