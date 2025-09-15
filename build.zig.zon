@@ -1,0 +1,17 @@
+.{
+    .name = .Cambion,
+    .version = "0.0.0",
+    .fingerprint = 0xd4c32b89c8d966c7, // Changing this has security and trust implications.
+
+    .minimum_zig_version = "0.14.1",
+
+    .dependencies = .{
+        .glfw = .{
+            .url = "git+https://github.com/allyourcodebase/glfw#98607df9bce062c7fd837d58fafa06dae22edb04",
+            .hash = "glfw-0.0.0-R5AeUm0HGgA_Rlrr9HR91ejkGd-K_JyCjkXz_U3b-jp9",
+        },
+    },
+    .paths = .{
+        "",
+    },
+}
