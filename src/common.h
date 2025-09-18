@@ -1,7 +1,8 @@
+#pragma once
 #include <assert.h>
 #include <stdio.h>
 
-#include <vulkan/vulkan.h>
+//#include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 
 #include <glm/vec4.hpp>

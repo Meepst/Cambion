@@ -1,6 +1,7 @@
 #include "common.h"
 #include "device.h"
 #include "swapchain.h"
+#include "vulkan/vulkan_core.h"
 
 #include <iostream>
 
@@ -193,12 +194,23 @@ VkRenderPass createRenderPass(VkDevice device, VkFormat format){
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
 
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+
     VkRenderPassCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     createInfo.attachmentCount = 1;
     createInfo.pAttachments = &colorAttachment;
     createInfo.subpassCount = 1;
     createInfo.pSubpasses = &subpass;
+    createInfo.dependencyCount = 1;
+    createInfo.pDependencies = &dependency;
 
     VkRenderPass renderPass = 0;
     VK_CHECK(vkCreateRenderPass(device, &createInfo, nullptr, &renderPass));
@@ -251,7 +263,8 @@ void createCommandBuffer(VkDevice device, VkCommandPool commandPool,VkCommandBuf
 }
 
 void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
-    VkRenderPass renderpass, std::vector<VkFramebuffer> framebuffers, Swapchain swapchain){
+    VkRenderPass renderpass, std::vector<VkFramebuffer> framebuffers, Swapchain swapchain,
+    uint32_t frameIndex, VkPipeline graphicsPipeline){
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     
@@ -260,7 +273,37 @@ void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassInfo.renderPass = renderpass;
-    
+    renderPassInfo.framebuffer = framebuffers[frameIndex];
+    renderPassInfo.renderArea.offset = {0,0};
+    renderPassInfo.renderArea.extent.width = swapchain.width;
+    renderPassInfo.renderArea.extent.height = swapchain.height;
+
+    VkClearValue clearColor = {{{8.0f,4.0f,1.0f,1.0f}}};
+    renderPassInfo.clearValueCount = 1;
+    renderPassInfo.pClearValues = &clearColor;
+
+    vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(swapchain.width);
+    viewport.height = static_cast<float>(swapchain.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.offset = {0,0};
+    scissor.extent.width = swapchain.width;
+    scissor.extent.height = swapchain.height;
+    vkCmdSetScissor(commandBuffer,0,1,&scissor);
+
+    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+    vkCmdEndRenderPass(commandBuffer);
+    VK_CHECK(vkEndCommandBuffer(commandBuffer));
 }
 
 VkSurfaceKHR createSurface(VkInstance instance, GLFWwindow* window){
@@ -332,7 +375,26 @@ VkPhysicalDevice selectPhysicalDevice(VkPhysicalDevice* physicalDevices, uint32_
     return result;
 }
 
-// TODO: Add logical device creation (VkDevice)
+VkSemaphore createSemaphore(VkDevice device){
+    VkSemaphoreCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    VkSemaphore semaphore = 0;
+    VK_CHECK(vkCreateSemaphore(device, &createInfo, 0, &semaphore));
+
+    return semaphore;
+}
+
+VkFence createFence(VkDevice device){
+    VkFenceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    createInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; // change later
+
+    VkFence fence = 0;
+    VK_CHECK(vkCreateFence(device, &createInfo, 0, &fence));
+
+    return fence;
+}
 
 int main(){
     glfwInit();
@@ -375,11 +437,59 @@ int main(){
     VkCommandBuffer commandBuffer = 0;
     createCommandBuffer(device, commandPool, commandBuffer);
 
-
+    VkSemaphore imageAvailableSemaphore = createSemaphore(device);
+    VkSemaphore renderFinishedSemaphore = createSemaphore(device);
+    VkFence inFlightFence = createFence(device);
+    
+    VkQueue graphicsQueue = 0;
+    vkGetDeviceQueue(device, familyIndex, familyIndex, &graphicsQueue);
 
     while(!glfwWindowShouldClose(window)){
         glfwPollEvents();
-    }
+
+        vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+        vkResetFences(device, 1, &inFlightFence);
+
+        uint32_t imageIndex;
+        vkAcquireNextImageKHR(device, swapchain.swapchain, UINT64_MAX, imageAvailableSemaphore,
+             VK_NULL_HANDLE, &imageIndex);
+        
+        vkResetCommandBuffer(commandBuffer, 0);
+        recordCommandBuffer(device, commandBuffer, renderPass, framebuffers, swapchain, imageIndex, graphicsPipeline);
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+        VkSemaphore waitSemaphores[] = {imageAvailableSemaphore};
+        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = waitSemaphores;
+        submitInfo.pWaitDstStageMask = waitStages;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+
+        VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = signalSemaphores;
+
+        VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence));
+
+        VkPresentInfoKHR presentInfo{};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = signalSemaphores;
+
+        VkSwapchainKHR swapchains[] = {swapchain.swapchain};
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = swapchains;
+        presentInfo.pImageIndices = &imageIndex;
+
+        vkQueuePresentKHR(graphicsQueue, &presentInfo);
+    }     
+    vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
+    vkDestroySemaphore(device, renderFinishedSemaphore,nullptr);
+    vkDestroyFence(device, inFlightFence, nullptr);
 
     for(auto framebuffer : framebuffers)
         vkDestroyFramebuffer(device, framebuffer, nullptr);
