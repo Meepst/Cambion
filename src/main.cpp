@@ -1,13 +1,14 @@
 #include "common.h"
 #include "device.h"
 #include "swapchain.h"
-#include "vulkan/vulkan_core.h"
+
+#define _Debug
 
 #include <iostream>
 
 #define DEVICE_COUNT 16
 
-void createImageViews(VkDevice device, Swapchain swapchain, VkFormat format, std::vector<VkImageView> imageViews){
+void createImageViews(VkDevice device, Swapchain swapchain, VkFormat format, std::vector<VkImageView> &imageViews){
     imageViews.resize(swapchain.imageCount);
 
     for(size_t i=0;i<swapchain.images.size();i++){
@@ -32,7 +33,7 @@ void createImageViews(VkDevice device, Swapchain swapchain, VkFormat format, std
 std::vector<char> readShader(const std::string& filename){
     // open file and keep into in byte code / binary form
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
-    assert(!file.is_open());
+    assert(file.is_open());
 
     size_t fileSize = (size_t)file.tellg();
     std::vector<char> buffer(fileSize);
@@ -49,7 +50,7 @@ VkShaderModule createShaderModule(VkDevice device, const std::vector<char>& code
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = code.size();
     createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
+    
     VkShaderModule shaderModule = 0;
     VK_CHECK(vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule));
 
@@ -59,8 +60,8 @@ VkShaderModule createShaderModule(VkDevice device, const std::vector<char>& code
 
 void createGraphicsPipeline(VkDevice device, Swapchain swapchain,
      VkPipeline &pipeline, VkPipelineLayout &pipelineLayout, VkRenderPass renderPass){
-    auto vertShaderCode = readShader("shaders/vert.spv");
-    auto fragShaderCode = readShader("shaders/frag.spv");
+    auto vertShaderCode = readShader("./src/shaders/vert.spv");
+    auto fragShaderCode = readShader("./src/shaders/frag.spv");
 
     VkShaderModule vertShaderModule = createShaderModule(device, vertShaderCode);
     VkShaderModule fragShaderModule = createShaderModule(device, fragShaderCode);
@@ -146,11 +147,6 @@ void createGraphicsPipeline(VkDevice device, Swapchain swapchain,
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments = &colorBlendAttachment;
 
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-
-    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout));
-
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineInfo.stageCount = 2;
@@ -198,7 +194,7 @@ VkRenderPass createRenderPass(VkDevice device, VkFormat format){
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     dependency.dstSubpass = 0;
     dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.srcAccessMask = 0;
+    dependency.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
     dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
@@ -212,14 +208,25 @@ VkRenderPass createRenderPass(VkDevice device, VkFormat format){
     createInfo.dependencyCount = 1;
     createInfo.pDependencies = &dependency;
 
-    VkRenderPass renderPass = 0;
+    VkRenderPass renderPass = VK_NULL_HANDLE;
     VK_CHECK(vkCreateRenderPass(device, &createInfo, nullptr, &renderPass));
 
     return renderPass;
 }
 
+VkPipelineLayout createPipelineLayout(VkDevice device){
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 0;
+    pipelineLayoutInfo.pushConstantRangeCount = 0;
+    
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout));
+    return pipelineLayout;
+}
+
 void createFramebuffers(VkDevice device, VkRenderPass renderpass,
-     Swapchain swapchain, std::vector<VkImageView> views,std::vector<VkFramebuffer> framebuffers){
+     Swapchain swapchain, std::vector<VkImageView> views,std::vector<VkFramebuffer> &framebuffers){
     framebuffers.resize(views.size());
 
     for(size_t i=0; i<views.size();i++){
@@ -306,75 +313,6 @@ void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
     VK_CHECK(vkEndCommandBuffer(commandBuffer));
 }
 
-VkSurfaceKHR createSurface(VkInstance instance, GLFWwindow* window){
-    VkSurfaceKHR surface = 0;
-    VK_CHECK(glfwCreateWindowSurface(instance,window,nullptr,&surface));
-    return surface;
-}
-
-uint32_t getGraphicsFamilyIndex(VkPhysicalDevice physicalDevice){
-    uint32_t queueCount = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueCount, 0);
-
-    std::vector<VkQueueFamilyProperties> queues(queueCount);
-    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueCount, queues.data());
-
-    for(uint32_t i=0; i<queueCount;i++){
-        if(queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) 
-            return i;
-    }
-
-    return VK_QUEUE_FAMILY_IGNORED;
-}
-
-bool supportsPresentation(VkPhysicalDevice physicalDevice, uint32_t index, VkSurfaceKHR surface){
-    VkBool32 presentSupport = false;
-    vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice,index,surface,&presentSupport);
-    return presentSupport;
-}
-
-VkPhysicalDevice selectPhysicalDevice(VkPhysicalDevice* physicalDevices, uint32_t physicalDeviceCount, VkSurfaceKHR surface){
-    VkPhysicalDevice discreteGPU = 0;
-    VkPhysicalDevice defaultGPU = 0;
-    const char* nGPU = getenv("NGPU"); // user preferred device
-
-    for(uint32_t i=0;i<physicalDeviceCount;i++){
-        VkPhysicalDeviceProperties properties;
-        vkGetPhysicalDeviceProperties(physicalDevices[i],&properties);
-
-        if(properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) continue;
-
-        printf("GPU%d: %s (Vulkan 1.%d)\n",i,properties.deviceName,VK_VERSION_MINOR(properties.apiVersion));
-
-        uint32_t familyIndex = getGraphicsFamilyIndex(physicalDevices[i]);
-        if(familyIndex == VK_QUEUE_FAMILY_IGNORED) continue;
-
-        if(!supportsPresentation(physicalDevices[i], familyIndex,surface)) continue;
-
-        if(properties.apiVersion < API_VERSION) continue;
-
-        if(nGPU && atoi(nGPU) == i) 
-            discreteGPU = physicalDevices[i];
-
-        if(!discreteGPU && properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
-            discreteGPU = physicalDevices[i];
-        
-        if(!defaultGPU)
-            defaultGPU = physicalDevices[i];
-    }
-    
-    VkPhysicalDevice result = discreteGPU ? discreteGPU : defaultGPU;
-
-    if(result){
-        VkPhysicalDeviceProperties properties;
-        vkGetPhysicalDeviceProperties(result,&properties);
-        printf("Selected GPU %s\n",properties.deviceName);
-    }else{
-        printf("Error: compatible GPU not found\n");
-    }
-    return result;
-}
-
 VkSemaphore createSemaphore(VkDevice device){
     VkSemaphoreCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -400,10 +338,11 @@ int main(){
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     GLFWwindow* window = glfwCreateWindow(800,600,"Cambion",nullptr,nullptr);
-    printf("begin\n");
+    assert(window);
+
     VkInstance instance = createInstance();
     VkSurfaceKHR surface = createSurface(instance, window);
-
+    
     VkPhysicalDevice physicalDevices[DEVICE_COUNT];
     uint32_t physicalDeviceCount = DEVICE_COUNT;
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices));
@@ -420,18 +359,18 @@ int main(){
 
     std::vector<VkImageView> swapchainImageViews;
     createImageViews(device, swapchain, swapchainFormat, swapchainImageViews);
+    VkPipelineLayout pipelineLayout = createPipelineLayout(device);
 
     VkRenderPass renderPass = createRenderPass(device, swapchainFormat);
-    
-    VkPipelineLayout pipelineLayout = 0;
+   
     VkPipeline graphicsPipeline = 0;
     createGraphicsPipeline(device, swapchain, graphicsPipeline,
-         pipelineLayout, renderPass);
-
+        pipelineLayout, renderPass);
+    
     std::vector<VkFramebuffer> framebuffers;
     createFramebuffers(device, renderPass, swapchain,swapchainImageViews,
-    framebuffers);
-
+        framebuffers);
+   
     VkCommandPool commandPool = createCommandPool(device, familyIndex);
     
     VkCommandBuffer commandBuffer = 0;
@@ -440,21 +379,22 @@ int main(){
     VkSemaphore imageAvailableSemaphore = createSemaphore(device);
     VkSemaphore renderFinishedSemaphore = createSemaphore(device);
     VkFence inFlightFence = createFence(device);
-    
+   
     VkQueue graphicsQueue = 0;
-    vkGetDeviceQueue(device, familyIndex, familyIndex, &graphicsQueue);
-
+    vkGetDeviceQueue(device, familyIndex, 0, &graphicsQueue);
+    
     while(!glfwWindowShouldClose(window)){
         glfwPollEvents();
-
+        
         vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
         vkResetFences(device, 1, &inFlightFence);
 
-        uint32_t imageIndex;
+        uint32_t imageIndex = 0;
         vkAcquireNextImageKHR(device, swapchain.swapchain, UINT64_MAX, imageAvailableSemaphore,
-             VK_NULL_HANDLE, &imageIndex);
-        
+            VK_NULL_HANDLE, &imageIndex);
+            
         vkResetCommandBuffer(commandBuffer, 0);
+        
         recordCommandBuffer(device, commandBuffer, renderPass, framebuffers, swapchain, imageIndex, graphicsPipeline);
 
         VkSubmitInfo submitInfo{};
@@ -486,13 +426,14 @@ int main(){
         presentInfo.pImageIndices = &imageIndex;
 
         vkQueuePresentKHR(graphicsQueue, &presentInfo);
-    }     
+    }
+
     vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
     vkDestroySemaphore(device, renderFinishedSemaphore,nullptr);
     vkDestroyFence(device, inFlightFence, nullptr);
 
     for(auto framebuffer : framebuffers)
-        vkDestroyFramebuffer(device, framebuffer, nullptr);
+       vkDestroyFramebuffer(device, framebuffer, nullptr);
 
     for(auto view : swapchainImageViews)
         vkDestroyImageView(device, view, nullptr);

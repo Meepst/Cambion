@@ -109,7 +109,6 @@ VkPhysicalDevice selectPhysicalDevice(VkPhysicalDevice* physicalDevices, uint32_
     return result;
 }
 
-// TODO: Add logical device creation (VkDevice)
 VkDevice createDevice(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t index){
     float queuePriorities[]={1.0};
     VkDeviceQueueCreateInfo queueInfo{};
@@ -119,7 +118,7 @@ VkDevice createDevice(VkInstance instance, VkPhysicalDevice physicalDevice, uint
     queueInfo.pQueuePriorities = queuePriorities;
 
     // TODO: make vector later
-    const char* extensions = {
+    const char* extensions[] = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     };
 
@@ -127,7 +126,7 @@ VkDevice createDevice(VkInstance instance, VkPhysicalDevice physicalDevice, uint
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.queueCreateInfoCount = 1;
     createInfo.pQueueCreateInfos = &queueInfo;
-    createInfo.ppEnabledExtensionNames = &extensions;
+    createInfo.ppEnabledExtensionNames = extensions;
     createInfo.enabledExtensionCount = sizeof(extensions) / sizeof(extensions[0]);
     createInfo.pNext = nullptr; // will change later to include features
 
