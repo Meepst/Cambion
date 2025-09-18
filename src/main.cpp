@@ -228,6 +228,41 @@ void createFramebuffers(VkDevice device, VkRenderPass renderpass,
     }
 }
 
+VkCommandPool createCommandPool(VkDevice device, uint32_t familyIndex){
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    poolInfo.queueFamilyIndex = familyIndex;
+
+    VkCommandPool commandPool = 0;
+    VK_CHECK(vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool));
+
+    return commandPool;
+}
+
+void createCommandBuffer(VkDevice device, VkCommandPool commandPool,VkCommandBuffer &commandBuffer){
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = commandPool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+
+    VK_CHECK(vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer));
+}
+
+void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
+    VkRenderPass renderpass, std::vector<VkFramebuffer> framebuffers, Swapchain swapchain){
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    
+    VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
+
+    VkRenderPassBeginInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassInfo.renderPass = renderpass;
+    
+}
+
 int main(){
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -264,6 +299,13 @@ int main(){
     createFramebuffers(device, renderPass, swapchain,swapchainImageViews,
     framebuffers);
 
+    VkCommandPool commandPool = createCommandPool(device, familyIndex);
+    
+    VkCommandBuffer commandBuffer = 0;
+    createCommandBuffer(device, commandPool, commandBuffer);
+
+
+
     while(!glfwWindowShouldClose(window)){
         glfwPollEvents();
     }
@@ -274,6 +316,7 @@ int main(){
     for(auto view : swapchainImageViews)
         vkDestroyImageView(device, view, nullptr);
 
+    vkDestroyCommandPool(device, commandPool, nullptr);
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
     vkDestroyRenderPass(device, renderPass, nullptr);
