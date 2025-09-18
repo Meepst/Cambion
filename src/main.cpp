@@ -263,6 +263,77 @@ void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
     
 }
 
+VkSurfaceKHR createSurface(VkInstance instance, GLFWwindow* window){
+    VkSurfaceKHR surface = 0;
+    VK_CHECK(glfwCreateWindowSurface(instance,window,nullptr,&surface));
+    return surface;
+}
+
+uint32_t getGraphicsFamilyIndex(VkPhysicalDevice physicalDevice){
+    uint32_t queueCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueCount, 0);
+
+    std::vector<VkQueueFamilyProperties> queues(queueCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueCount, queues.data());
+
+    for(uint32_t i=0; i<queueCount;i++){
+        if(queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) 
+            return i;
+    }
+
+    return VK_QUEUE_FAMILY_IGNORED;
+}
+
+bool supportsPresentation(VkPhysicalDevice physicalDevice, uint32_t index, VkSurfaceKHR surface){
+    VkBool32 presentSupport = false;
+    vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice,index,surface,&presentSupport);
+    return presentSupport;
+}
+
+VkPhysicalDevice selectPhysicalDevice(VkPhysicalDevice* physicalDevices, uint32_t physicalDeviceCount, VkSurfaceKHR surface){
+    VkPhysicalDevice discreteGPU = 0;
+    VkPhysicalDevice defaultGPU = 0;
+    const char* nGPU = getenv("NGPU"); // user preferred device
+
+    for(uint32_t i=0;i<physicalDeviceCount;i++){
+        VkPhysicalDeviceProperties properties;
+        vkGetPhysicalDeviceProperties(physicalDevices[i],&properties);
+
+        if(properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) continue;
+
+        printf("GPU%d: %s (Vulkan 1.%d)\n",i,properties.deviceName,VK_VERSION_MINOR(properties.apiVersion));
+
+        uint32_t familyIndex = getGraphicsFamilyIndex(physicalDevices[i]);
+        if(familyIndex == VK_QUEUE_FAMILY_IGNORED) continue;
+
+        if(!supportsPresentation(physicalDevices[i], familyIndex,surface)) continue;
+
+        if(properties.apiVersion < API_VERSION) continue;
+
+        if(nGPU && atoi(nGPU) == i) 
+            discreteGPU = physicalDevices[i];
+
+        if(!discreteGPU && properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+            discreteGPU = physicalDevices[i];
+        
+        if(!defaultGPU)
+            defaultGPU = physicalDevices[i];
+    }
+    
+    VkPhysicalDevice result = discreteGPU ? discreteGPU : defaultGPU;
+
+    if(result){
+        VkPhysicalDeviceProperties properties;
+        vkGetPhysicalDeviceProperties(result,&properties);
+        printf("Selected GPU %s\n",properties.deviceName);
+    }else{
+        printf("Error: compatible GPU not found\n");
+    }
+    return result;
+}
+
+// TODO: Add logical device creation (VkDevice)
+
 int main(){
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
