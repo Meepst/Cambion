@@ -65,6 +65,10 @@ pub fn build(b: *std.Build) void {
         .flags = &.{},
         .files = &.{
             "main.cpp",
+            "alloc.cpp",
+            "arena.cpp",
+            "device.cpp",
+            "swapchain.cpp",
         },
     });
 
