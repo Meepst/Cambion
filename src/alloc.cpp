@@ -1,20 +1,12 @@
 #include "alloc.h"
 
-#ifdef __int64
-#error "__int64 has been redefined!"
-#endif
 
-#ifdef unsigned
-#error "unsigned has been redefined!"
-#endif
+internal uint64_t initialize();
 
-
-Internal uint64_t initialize();
-
-Internal const uint64_t PAGE_SIZE = initialize();
+internal const uint64_t PAGE_SIZE = initialize();
 
 // Runs before main
-Internal uint64_t initialize() {
+internal uint64_t initialize() {
 #if _WIN32
     return 0; // Page size not currently used for Windows
 
