@@ -1,5 +1,14 @@
 #include "arena.h"
 
+#ifdef __int64
+#error "__int64 has been redefined!"
+#endif
+
+#ifdef unsigned
+#error "unsigned has been redefined!"
+#endif
+
+
 
 Allocator arenaNew(uint64_t minimum_bytes) {
     assert(minimum_bytes > 0);

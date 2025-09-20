@@ -5,6 +5,7 @@
 #define _Debug
 
 #include <iostream>
+#include <array>
 
 #define DEVICE_COUNT 16
 #define MAX_FRAMES_IN_FLIGHT 2
@@ -13,6 +14,28 @@
 struct Vertex{
     glm::vec2 pos;
     glm::vec3 color;
+
+    static VkVertexInputBindingDescription getBindingDescription(){
+        VkVertexInputBindingDescription bindingDescription{};
+        bindingDescription.binding = 0;
+        bindingDescription.stride = sizeof(Vertex);
+        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        return bindingDescription;
+    }
+    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+        attributeDescriptions[0].binding = 0;
+        attributeDescriptions[0].location = 0;
+        attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[0].offset = offsetof(Vertex, pos);
+
+        attributeDescriptions[1].binding = 0;
+        attributeDescriptions[1].location = 1;
+        attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[1].offset = offsetof(Vertex, color);
+        return attributeDescriptions;
+    }
 };
 
 struct Buffer{
@@ -178,12 +201,17 @@ void createGraphicsPipeline(VkDevice device, Swapchain swapchain,
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
 
+    auto bindingDescription = Vertex::getBindingDescription();
+    auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 0;
-    vertexInputInfo.pVertexBindingDescriptions = nullptr; 
-    vertexInputInfo.vertexAttributeDescriptionCount = 0;
-    vertexInputInfo.pVertexAttributeDescriptions = nullptr; 
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(
+        attributeDescriptions.size()
+    ); 
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data(); 
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -357,16 +385,10 @@ void createCommandBuffer(VkDevice device, VkCommandPool commandPool,VkCommandBuf
     VK_CHECK(vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer));
 }
 
-<<<<<<< HEAD
-void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
-    VkRenderPass renderpass, std::vector<VkFramebuffer> framebuffers, Swapchain swapchain,
-    uint32_t frameIndex, VkPipeline graphicsPipeline){
-=======
 // TODO: this needs to be removed and placed in main, but specific steps we can abstract
 void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
     VkRenderPass renderpass, std::vector<VkFramebuffer> framebuffers, Swapchain swapchain,
     uint32_t frameIndex, VkPipeline graphicsPipeline, Buffer &buffer){
->>>>>>> 9b0bac1fe0db43925f5a4263726ee63101ca39e9
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     
@@ -387,13 +409,10 @@ void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
-<<<<<<< HEAD
-=======
     VkBuffer buffers[] = {buffer.buffer};
-    VkDeviceSize offset[] = {0};
+    VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(commandBuffer,0,1,buffers,offsets);
 
->>>>>>> 9b0bac1fe0db43925f5a4263726ee63101ca39e9
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
@@ -409,11 +428,7 @@ void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
     scissor.extent.height = swapchain.height;
     vkCmdSetScissor(commandBuffer,0,1,&scissor);
 
-<<<<<<< HEAD
-    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
-=======
     vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
->>>>>>> 9b0bac1fe0db43925f5a4263726ee63101ca39e9
 
     vkCmdEndRenderPass(commandBuffer);
     VK_CHECK(vkEndCommandBuffer(commandBuffer));
@@ -480,8 +495,10 @@ int main(){
    
     VkCommandPool commandPool = createCommandPool(device, familyIndex);
     
-    VkCommandBuffer commandBuffer = 0;
-    createCommandBuffer(device, commandPool, commandBuffer);
+    VkCommandBuffer commandBuffers[MAX_FRAMES_IN_FLIGHT];
+    for(size_t i=0; i<MAX_FRAMES_IN_FLIGHT; i++){ 
+        createCommandBuffer(device, commandPool, commandBuffers[i]);
+    }
 
     VkSemaphore renderFinishedSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkSemaphore imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT];
@@ -496,20 +513,29 @@ int main(){
     VkQueue graphicsQueue = 0;
     vkGetDeviceQueue(device, familyIndex, 0, &graphicsQueue);
     
+    VkPhysicalDeviceMemoryProperties memoryProperties;
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
+
+    Buffer vertexBuffer{};
+    createBuffer(vertexBuffer, device, memoryProperties, vertices.size(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
     uint32_t currentFrame = 0;
     while(!glfwWindowShouldClose(window)){
         glfwPollEvents();
-        
+    
+        vkQueueWaitIdle(graphicsQueue);
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
-        vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
         uint32_t imageIndex = 0;
         vkAcquireNextImageKHR(device, swapchain.swapchain, UINT64_MAX, imageAvailableSemaphores[currentFrame],
             VK_NULL_HANDLE, &imageIndex);
-            
-        vkResetCommandBuffer(commandBuffer, 0);
         
-        recordCommandBuffer(device, commandBuffer, renderPass, framebuffers, swapchain, imageIndex, graphicsPipeline);
+        vkResetFences(device, 1, &inFlightFences[currentFrame]);
+    
+        vkResetCommandBuffer(commandBuffers[currentFrame], 0);
+        
+        recordCommandBuffer(device, commandBuffers[currentFrame], renderPass, framebuffers, swapchain, imageIndex, graphicsPipeline,vertexBuffer);
 
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -520,7 +546,7 @@ int main(){
         submitInfo.pWaitSemaphores = waitSemaphores;
         submitInfo.pWaitDstStageMask = waitStages;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
 
         VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
         submitInfo.signalSemaphoreCount = 1;
@@ -547,6 +573,7 @@ int main(){
 
     vkDeviceWaitIdle(device);
 
+    destroyBuffer(vertexBuffer, device);
     for(int i=0;i<MAX_FRAMES_IN_FLIGHT;i++){
         vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
         vkDestroySemaphore(device, renderFinishedSemaphores[i],nullptr);

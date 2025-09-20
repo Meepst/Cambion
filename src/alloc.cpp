@@ -1,5 +1,13 @@
 #include "alloc.h"
 
+#ifdef __int64
+#error "__int64 has been redefined!"
+#endif
+
+#ifdef unsigned
+#error "unsigned has been redefined!"
+#endif
+
 
 Internal uint64_t initialize();
 

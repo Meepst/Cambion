@@ -1,7 +1,6 @@
 #pragma once
-#include "alloc.h"
-
 #include <stdint.h>
+#include "alloc.h"
 
 
 // Allocates memory using an increasing offset to its own reserved memory,
