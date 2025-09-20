@@ -1,3 +1,4 @@
+#pragma once
 #include "common.h"
 
 enum SwapchainStatus{
@@ -22,4 +23,3 @@ void createSwapchain(Swapchain& result, VkPhysicalDevice physicalDevice, VkDevic
     
 SwapchainStatus updateSwapchain(Swapchain& result, VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
     uint32_t familyIndex, GLFWwindow* window, VkFormat format);
-

@@ -9,12 +9,42 @@
 #define DEVICE_COUNT 16
 #define MAX_FRAMES_IN_FLIGHT 2
 
+// TODO: need to add input binding descriptors
+struct Vertex{
+    glm::vec2 pos;
+    glm::vec3 color;
+};
+
 struct Buffer{
     VkBuffer buffer;
     VkDeviceMemory memory;
     void* data;
     size_t size;
 };
+
+const std::vector<Vertex> vertices = {
+    {{0.0f,-0.5f},{1.0f,0.0f,0.0f}},
+    {{0.5f,0.5f},{0.0f,1.0f,0.0f}},
+    {{-0.5f,0.5f},{0.0f,0.0f,1.0f}},
+};
+
+uint32_t selectMemoryType(const VkPhysicalDeviceMemoryProperties &memoryProperties,
+    uint32_t memoryTypeBits, VkMemoryPropertyFlags flags){
+    for(uint32_t i =0; i<memoryProperties.memoryTypeCount; i++){
+        // memoryTypeBits is a bitmask
+        // its an unsigned 32 bit value and each bit is a "memory type index"
+        // we shift left i amount of types to check our current memory index properties
+        // if it returns 0 that memory type is not available for us
+        // if true then we determine if that index has the property flags that we want
+        if((memoryTypeBits & (1 << i)) != 0 && (memoryProperties.memoryTypes[i].propertyFlags & flags) == flags){
+            return i; // return the hopefully valid memory index
+        }
+    }
+
+    // if not found force an assert and return max int
+    assert(!"Unable to find compatible memory type");
+    return ~0u;
+}
 
 void createBuffer(Buffer &result, VkDevice device, const VkPhysicalDeviceMemoryProperties& memoryProperties,
     size_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryFlags){
@@ -29,8 +59,41 @@ void createBuffer(Buffer &result, VkDevice device, const VkPhysicalDeviceMemoryP
     VkMemoryRequirements memoryRequirements;
     vkGetBufferMemoryRequirements(device, buffer, &memoryRequirements);
 
-    //uint32_t memoryTypeIndex = selectMemoryType(memoryProperties, memoryRequirements.memoryTypeBits, memoryFlags);
-    
+    uint32_t memoryTypeIndex = selectMemoryType(memoryProperties, memoryRequirements.memoryTypeBits, memoryFlags);
+    assert(memoryTypeIndex != ~0u); // if uint max returned no memory available
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memoryRequirements.size;
+    allocInfo.memoryTypeIndex = memoryTypeIndex;
+
+    VkMemoryAllocateFlagsInfo flagInfo{};
+    flagInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+
+    if(usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT){
+        allocInfo.pNext = &flagInfo;
+        flagInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+        flagInfo.deviceMask = 1;
+    }
+
+    VkDeviceMemory memory = 0;
+    VK_CHECK(vkAllocateMemory(device, &allocInfo, 0, &memory));
+    VK_CHECK(vkBindBufferMemory(device, buffer, memory, 0));
+
+    void* data = 0;
+    if(memoryFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT){
+        VK_CHECK(vkMapMemory(device, memory, 0, size, 0, &data));
+    }
+
+    result.buffer = buffer;
+    result.memory = memory;
+    result.data = data;
+    result.size = size;
+}
+
+void destroyBuffer(const Buffer& buffer, VkDevice device){
+    vkDestroyBuffer(device, buffer.buffer, 0);
+    vkFreeMemory(device, buffer.memory, 0);
 }
 
 void createImageViews(VkDevice device, Swapchain swapchain, VkFormat format, std::vector<VkImageView> &imageViews){
@@ -294,9 +357,16 @@ void createCommandBuffer(VkDevice device, VkCommandPool commandPool,VkCommandBuf
     VK_CHECK(vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer));
 }
 
+<<<<<<< HEAD
 void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
     VkRenderPass renderpass, std::vector<VkFramebuffer> framebuffers, Swapchain swapchain,
     uint32_t frameIndex, VkPipeline graphicsPipeline){
+=======
+// TODO: this needs to be removed and placed in main, but specific steps we can abstract
+void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
+    VkRenderPass renderpass, std::vector<VkFramebuffer> framebuffers, Swapchain swapchain,
+    uint32_t frameIndex, VkPipeline graphicsPipeline, Buffer &buffer){
+>>>>>>> 9b0bac1fe0db43925f5a4263726ee63101ca39e9
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     
@@ -317,6 +387,13 @@ void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
+<<<<<<< HEAD
+=======
+    VkBuffer buffers[] = {buffer.buffer};
+    VkDeviceSize offset[] = {0};
+    vkCmdBindVertexBuffers(commandBuffer,0,1,buffers,offsets);
+
+>>>>>>> 9b0bac1fe0db43925f5a4263726ee63101ca39e9
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
@@ -332,7 +409,11 @@ void recordCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer,
     scissor.extent.height = swapchain.height;
     vkCmdSetScissor(commandBuffer,0,1,&scissor);
 
+<<<<<<< HEAD
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+=======
+    vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+>>>>>>> 9b0bac1fe0db43925f5a4263726ee63101ca39e9
 
     vkCmdEndRenderPass(commandBuffer);
     VK_CHECK(vkEndCommandBuffer(commandBuffer));
