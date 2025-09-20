@@ -49,7 +49,7 @@ void arenaPop(Allocator& allocator, uint64_t bytes, ...) {
     assert(allocator.data != nullptr);
 
     Arena* arena = (Arena*)allocator.data;
-    assert(((uintptr_t)arena->last - bytes) >= 0);
+    assert(((uintptr_t)arena->last >= bytes));
 
     void* ptr = (void*)((uintptr_t)arena->memory + (uintptr_t)arena->last);
     arena->last -= bytes;
