@@ -109,7 +109,8 @@ VkPhysicalDevice selectPhysicalDevice(VkPhysicalDevice* physicalDevices, uint32_
     return result;
 }
 
-VkDevice createDevice(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t index){
+VkDevice createDevice(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t index,
+    bool raytracingSupported, bool unifiedlayoutSupported){
     float queuePriorities[]={1.0};
     VkDeviceQueueCreateInfo queueInfo{};
     queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -118,17 +119,90 @@ VkDevice createDevice(VkInstance instance, VkPhysicalDevice physicalDevice, uint
     queueInfo.pQueuePriorities = queuePriorities;
 
     // TODO: make vector later
-    const char* extensions[] = {
+    std::vector<const char*> extensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     };
+
+    if(raytracingSupported){
+        extensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+        extensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+        extensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    }
+
+    VkPhysicalDeviceFeatures2 features2{};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.features.pipelineStatisticsQuery = true;
+	features2.features.shaderInt16 = true;
+	features2.features.shaderInt64 = true;
+	features2.features.samplerAnisotropy = true;
+
+    VkPhysicalDeviceVulkan11Features features11{};
+    features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    features11.storageBuffer16BitAccess = true;
+	features11.shaderDrawParameters = true;
+
+    VkPhysicalDeviceVulkan12Features features12{};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    features12.drawIndirectCount = true;
+	features12.storageBuffer8BitAccess = true;
+	features12.uniformAndStorageBuffer8BitAccess = true;
+	features12.shaderFloat16 = true;
+	features12.shaderInt8 = true;
+	features12.samplerFilterMinmax = true;
+	features12.scalarBlockLayout = true;
+    features12.descriptorIndexing = true;
+	features12.shaderSampledImageArrayNonUniformIndexing = true;
+	features12.descriptorBindingSampledImageUpdateAfterBind = true;
+	features12.descriptorBindingUpdateUnusedWhilePending = true;
+	features12.descriptorBindingPartiallyBound = true;
+	features12.descriptorBindingVariableDescriptorCount = true;
+	features12.runtimeDescriptorArray = true;
+
+    if (raytracingSupported)
+		features12.bufferDeviceAddress = true;
+
+    VkPhysicalDeviceVulkan13Features features13{};
+    features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    features13.dynamicRendering = true;
+	features13.synchronization2 = true;
+	features13.maintenance4 = true;
+	features13.shaderDemoteToHelperInvocation = true;
+
+    VkPhysicalDeviceVulkan14Features features14{};
+    features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+    features14.maintenance5 = true;
+	features14.maintenance6 = true;
+	features14.pushDescriptor = true;
+
+    VkPhysicalDeviceRayQueryFeaturesKHR featuresRayQueries{};
+    featuresRayQueries.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+    featuresRayQueries.rayQuery = true;
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR featuresAccelerationStructure{};
+    featuresAccelerationStructure.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    featuresAccelerationStructure.accelerationStructure = true;
+
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.queueCreateInfoCount = 1;
     createInfo.pQueueCreateInfos = &queueInfo;
-    createInfo.ppEnabledExtensionNames = extensions;
-    createInfo.enabledExtensionCount = sizeof(extensions) / sizeof(extensions[0]);
-    createInfo.pNext = nullptr; // will change later to include features
+    createInfo.ppEnabledExtensionNames = extensions.data();
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+    createInfo.pNext = &features2; 
+
+    features2.pNext = &features11;
+    features11.pNext = &features12;
+    features12.pNext = &features13;
+    features13.pNext = &features14;
+
+    void** ppNext = &features14.pNext;
+
+    if(raytracingSupported){
+        *ppNext = &featuresRayQueries;
+        featuresRayQueries.pNext = &featuresAccelerationStructure;
+        featuresAccelerationStructure.pNext = nullptr;
+    }
 
     VkDevice device = 0;
     VK_CHECK(vkCreateDevice(physicalDevice, &createInfo, 0, &device));

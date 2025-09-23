@@ -2,19 +2,19 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 
 #include <glm/vec4.hpp>
 #include <glm/mat4x4.hpp>
 
-#define NOMINMAX
 #if _WIN32
 #include <windows.h>
 #endif
 #include <vector>
 #include <algorithm>
 #include <fstream>
+#include <iostream>
+#include <array>
 
 #include "types.h"
 #include "alloc.h"

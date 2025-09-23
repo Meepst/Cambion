@@ -1,7 +1,7 @@
 #pragma once
 #include "common.h"
 
-#define API_VERSION VK_API_VERSION_1_0
+#define API_VERSION VK_API_VERSION_1_4
 
 // Vulkan assert macro for all vkCreate functions 
 #define VK_CHECK(call) \
@@ -20,4 +20,4 @@ bool supportsPresentation(VkPhysicalDevice physicalDevice, uint32_t index, VkSur
 
 VkPhysicalDevice selectPhysicalDevice(VkPhysicalDevice* physicalDevices, uint32_t physicalDeviceCount, VkSurfaceKHR surface);
 
-VkDevice createDevice(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t index);
+VkDevice createDevice(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t index, bool raytracingSupported, bool unifiedlayoutSupported);
