@@ -190,8 +190,8 @@ VkFence createFence(VkDevice device){
     return fence;
 }
 
-bool loadModel(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices){
-    fastObjMesh* obj = fast_obj_read("./assets/Oceanus100.obj");
+bool loadModel(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const char* path){
+    fastObjMesh* obj = fast_obj_read(path);
     if(!obj){
         printf("failed to load\n");
         return false;
@@ -325,7 +325,7 @@ int main(int argc, char *argv[]){
     // TODO: make scene or model header
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    assert(loadModel(vertices, indices));
+    assert(loadModel(vertices, indices, "assets/crocodile/crocodile.obj"));
 
     VkPhysicalDeviceMemoryProperties memoryProperties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
