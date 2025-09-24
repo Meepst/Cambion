@@ -13,7 +13,7 @@ add_executable(Cambion ${CPP_SOURCE_FILES})
 set_target_properties(Cambion PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED YES CXX_EXTENSIONS NO)
 
 target_compile_definitions(Cambion PRIVATE GLFW_INCLUDE_VULKAN GLM_FORCE_XYZW_ONLY GLM_FORCE_QUAT_DATA_XYZW GLM_FORCE_QUAT_CTOR_XYZW)
-target_include_directories(Cambion PRIVATE dependencies/glm "$ENV{VULKAN_SDK}/Include")
+target_include_directories(Cambion PRIVATE dependencies/glm dependencies/fast_obj "$ENV{VULKAN_SDK}/Include")
 target_link_directories(Cambion PRIVATE "$ENV{VULKAN_SDK}/Lib")
 
 if(WIN32)

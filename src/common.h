@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iostream>
 #include <array>
+#include <unordered_map>
 
 #include "types.h"
 #include "alloc.h"

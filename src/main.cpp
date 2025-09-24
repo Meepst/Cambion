@@ -2,6 +2,7 @@
 #include "device.h"
 #include "swapchain.h"
 #include "program.h"
+#include <fast_obj.h>
 
 #define _Debug
 
@@ -15,14 +16,45 @@ struct Buffer{
     size_t size;
 };
 
-const std::vector<Vertex> vertices = {
-    {{0.0f,-0.5f},{1.0f,0.0f,0.0f}},
-    {{0.5f,0.5f},{0.0f,1.0f,0.0f}},
-    {{-0.5f,0.5f},{0.0f,0.0f,1.0f}},
-};
+// const std::vector<Vertex> vertices = {
+//     {{0.0f,-0.5f, 0.5f},{1.0f,0.0f,0.0f}},
+//     {{0.5f,0.5f, 0.0f},{0.0f,1.0f,0.0f}},
+//     {{-0.5f,0.5f, 0.5f},{0.0f,0.0f,1.0f}},
+// };
 
-const std::vector<uint16_t> indices = {
-    0,1,2,2,3,0
+// const std::vector<uint16_t> indices = {
+//     0,1,2,2,3,0
+// };
+
+struct VertexHash{
+    size_t operator()(const Vertex& ver) const noexcept{
+        auto h1 = std::hash<float>{}(ver.pos.x);
+        auto h2 = std::hash<float>{}(ver.pos.y);
+        auto h3 = std::hash<float>{}(ver.pos.z);
+
+        auto h4 = std::hash<float>{}(ver.color.x);
+        auto h5 = std::hash<float>{}(ver.color.y);
+        auto h6 = std::hash<float>{}(ver.color.z);
+
+        auto h7 = std::hash<float>{}(ver.texCoord.x);
+        auto h8 = std::hash<float>{}(ver.texCoord.y);
+
+        size_t seed = 0;
+        auto hashCombine = [&seed](size_t h) {
+            seed ^= h + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        };
+
+        hashCombine(h1);
+        hashCombine(h2);
+        hashCombine(h3);
+        hashCombine(h4);
+        hashCombine(h5);
+        hashCombine(h6);
+        hashCombine(h7);
+        hashCombine(h8);
+
+        return seed;
+    }
 };
 
 uint32_t selectMemoryType(const VkPhysicalDeviceMemoryProperties &memoryProperties,
@@ -158,6 +190,58 @@ VkFence createFence(VkDevice device){
     return fence;
 }
 
+bool loadModel(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices){
+    fastObjMesh* obj = fast_obj_read("./assets/Oceanus100.obj");
+    if(!obj){
+        printf("failed to load\n");
+        return false;
+    }
+
+    size_t vertexOffset = 0;
+    size_t indexOffset = 0;
+
+    std::unordered_map<Vertex, uint32_t, VertexHash> uniqueVertices;
+
+    // Vertex : Vec2 pos & Vec3 color
+    for(unsigned int i=0;i<obj->face_count; i++){
+        for(unsigned int j=0;j<obj->face_vertices[i]-2;j++){
+            fastObjIndex indexX = obj->indices[indexOffset];
+            fastObjIndex indexY = obj->indices[indexOffset+j+1];
+            fastObjIndex indexZ = obj->indices[indexOffset+j+2];
+
+            fastObjIndex triIdx[3] = {indexX,indexY,indexZ};
+
+            for(unsigned k=0;k<3;k++){
+                float px = obj->positions[3*triIdx[k].p+0];
+                float py = obj->positions[3*triIdx[k].p+1];
+                float pz = obj->positions[3*triIdx[k].p+2];
+
+                glm::vec3 pos = {px,py,pz};
+                glm::vec3 color = {1.0f,1.0f,0.0f};
+                glm::vec2 texCoord = {0.0f,0.0f};
+
+                if(triIdx[k].t != 0){
+                    float u = obj->texcoords[2*triIdx[k].t+0];
+                    float v = obj->texcoords[2*triIdx[k].t+1];
+                    texCoord = {u,v};
+                }
+
+                Vertex vert = {pos,color,texCoord};
+
+                if(!uniqueVertices.contains(vert)){
+                    uint32_t idx = static_cast<uint32_t>(vertices.size());
+                    uniqueVertices[vert] = idx;
+                    vertices.push_back(vert); 
+                }
+
+                indices.push_back(uniqueVertices[vert]);
+            }
+        }
+        indexOffset += obj->face_vertices[i];
+    }
+
+    return true;
+}
 
 int main(int argc, char *argv[]){
     glfwInit();
@@ -191,6 +275,9 @@ int main(int argc, char *argv[]){
     uint32_t familyIndex = getGraphicsFamilyIndex(physicalDevice);
     VkDevice device = createDevice(instance, physicalDevice, familyIndex, raytracingSupported, unifiedlayoutsSupported);
 
+    VkQueue graphicsQueue = 0;
+    vkGetDeviceQueue(device, familyIndex, 0, &graphicsQueue);
+
     VkFormat swapchainFormat = getSwapchainFormat(physicalDevice, surface);
     
     Swapchain swapchain;
@@ -214,14 +301,16 @@ int main(int argc, char *argv[]){
     assert(result);
 
     Program mainProgram = createProgram(device, VK_PIPELINE_BIND_POINT_GRAPHICS, {&shaders["vertexshader.vert"],&shaders["fragshader.frag"]},0,0);
+  
     VkPipeline graphicsPipeline = createGraphicsPipeline(device, VK_NULL_HANDLE, vertBufferInfo, mainProgram,{});
+ 
     VkCommandPool commandPool = createCommandPool(device, familyIndex);
     
     VkCommandBuffer commandBuffers[MAX_FRAMES_IN_FLIGHT];
     for(size_t i=0; i<MAX_FRAMES_IN_FLIGHT; i++){ 
         createCommandBuffer(device, commandPool, commandBuffers[i]);
     }
-
+   
     VkSemaphore renderFinishedSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkSemaphore imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkFence inFlightFences[MAX_FRAMES_IN_FLIGHT];
@@ -231,14 +320,16 @@ int main(int argc, char *argv[]){
         renderFinishedSemaphores[i] = createSemaphore(device);
         inFlightFences[i] = createFence(device);
     }
-   
-    VkQueue graphicsQueue = 0;
-    vkGetDeviceQueue(device, familyIndex, 0, &graphicsQueue);
     
+ 
+    // TODO: make scene or model header
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    assert(loadModel(vertices, indices));
+
     VkPhysicalDeviceMemoryProperties memoryProperties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
-
-
+   
     // TODO: figure out how to upload data 
     Buffer vertexBuffer{};
     createBuffer(vertexBuffer, device, memoryProperties, vertices.size()*sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
@@ -248,14 +339,13 @@ int main(int argc, char *argv[]){
     vkUnmapMemory(device, vertexBuffer.memory);
 
     Buffer indexBuffer{};
-    createBuffer(indexBuffer, device, memoryProperties, indices.size()*sizeof(uint16_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+    createBuffer(indexBuffer, device, memoryProperties, indices.size()*sizeof(uint32_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-    memcpy(indexBuffer.data, indices.data(), sizeof(uint16_t)*indices.size());
+    memcpy(indexBuffer.data, indices.data(), sizeof(uint32_t)*indices.size());
     vkUnmapMemory(device, indexBuffer.memory);
 
     VkClearColorValue clearColor = {0.3f,0.6f,0.6f,1.0f};
-
 
     uint32_t currentFrame = 0;
     while(!glfwWindowShouldClose(window)){
