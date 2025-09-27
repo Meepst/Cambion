@@ -11,7 +11,7 @@ class Vector {
 
         Vector() = delete;
         Vector(Allocator& allocator, uint64_t num_elements, uint64_t alignment = 1):
-            data(alloc(allocator, sizeof(T) * num_elements, alignment)), size(alignPow2(sizeof(T) * num_elements, alignment)) {}
+            data(alloc(allocator, sizeof(T) * num_elements, alignment)), size(num_elements) {}
         T& operator[](uint64_t i) {
             if (i > size) {
                 printf("Error, Vector access out of bounds\n");
