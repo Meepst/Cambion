@@ -92,5 +92,5 @@ void dealloc(Allocator& allocator, uint64_t bytes, ...) {
 }
 
 uint64_t alignPow2(uint64_t num, uint64_t to) {
-    return num + (to - 1) & -to;
+    return num + (to - 1) & (~to + 1);
 }

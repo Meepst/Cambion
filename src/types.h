@@ -21,3 +21,8 @@ class Vector {
             return data[i];
         }
 };
+
+template <typename T>
+void dealloc(Allocator& allocator, Vector<T>& vector) {
+    allocator.dealloc(allocator, vector.size, vector.data);
+}

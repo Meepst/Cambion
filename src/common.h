@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <stdio.h>
 
+#include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 
 #include <glm/vec4.hpp>
@@ -10,6 +11,7 @@
 #if _WIN32
 #include <windows.h>
 #endif
+
 #include <vector>
 #include <algorithm>
 #include <fstream>

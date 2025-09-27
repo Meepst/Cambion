@@ -30,11 +30,11 @@ void osFree(void* memory, uint64_t size);
 
 
 typedef void*(*AllocFnPtr)(Allocator& allocator, uint64_t bytes, uint64_t alignment);
-typedef void(*FreeFnPtr)(Allocator& allocator, uint64_t bytes, ...);
+typedef void(*DeallocFnPtr)(Allocator& allocator, uint64_t bytes, ...);
 
 struct Allocator {
     AllocFnPtr alloc = nullptr;
-    FreeFnPtr dealloc = nullptr;
+    DeallocFnPtr dealloc = nullptr;
     void* data = nullptr;
 };
 // General alloc/dealloc functions, dispatches impl on allocator's function pointer
