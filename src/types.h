@@ -10,8 +10,8 @@ class Vector {
         uint64_t size;
 
         Vector() = delete;
-        Vector(Allocator& allocator, uint64_t size, uint64_t alignment = 1):
-            data(alloc(allocator, size, alignment)), size(alignPow2(size, alignment)) {}
+        Vector(Allocator& allocator, uint64_t num_elements, uint64_t alignment = 1):
+            data(alloc(allocator, sizeof(T) * num_elements, alignment)), size(alignPow2(sizeof(T) * num_elements, alignment)) {}
         T& operator[](uint64_t i) {
             if (i > size) {
                 printf("Error, Vector access out of bounds\n");
@@ -24,5 +24,5 @@ class Vector {
 
 template <typename T>
 void dealloc(Allocator& allocator, Vector<T>& vector) {
-    allocator.dealloc(allocator, vector.size, vector.data);
+    allocator.dealloc(allocator, sizeof(T) * vector.size, vector.data);
 }
