@@ -3,17 +3,43 @@
 #include "swapchain.h"
 #include "program.h"
 #include <fast_obj.h>
-
-#define _Debug
+#include <stb_image.h>
+#include <glm/gtc/matrix_transform.hpp>
 
 #define DEVICE_COUNT 16
 #define MAX_FRAMES_IN_FLIGHT 2
+
+#define VK_CHECK_FORCE(call) \
+	do \
+	{ \
+		VkResult result_ = call; \
+		if (result_ != VK_SUCCESS) \
+		{ \
+			fprintf(stderr, "%s:%d: %s failed with error %d\n", __FILE__, __LINE__, #call, result_); \
+			abort(); \
+		} \
+	} while (0)
+
+const int WINDOW_WIDTH = 800;
+const int WINDOW_HEIGHT = 600;
 
 struct Buffer{
     VkBuffer buffer;
     VkDeviceMemory memory;
     void* data;
     size_t size;
+};
+
+struct alignas(16) Camera{
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
+};  
+
+struct Image{
+    VkImage image;
+    VkImageView imageView;
+    VkDeviceMemory memory;
 };
 
 // const std::vector<Vertex> vertices = {
@@ -125,6 +151,27 @@ void destroyBuffer(const Buffer& buffer, VkDevice device){
     vkFreeMemory(device, buffer.memory, 0);
 }
 
+VkImageView createImageView(VkDevice device, VkImage image, VkFormat format, uint32_t mipLevel,
+    uint32_t levelCount){
+    VkImageAspectFlags aspectMask = (format == VK_FORMAT_D32_SFLOAT) ?
+        VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+    
+    VkImageViewCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    createInfo.format = format;
+    createInfo.subresourceRange.aspectMask = aspectMask;
+	createInfo.subresourceRange.baseMipLevel = mipLevel;
+	createInfo.subresourceRange.levelCount = levelCount;
+	createInfo.subresourceRange.layerCount = 1;
+    createInfo.image = image;
+
+    VkImageView view = 0;
+	VK_CHECK(vkCreateImageView(device, &createInfo, 0, &view));
+
+	return view;
+}
+
 void createImageViews(VkDevice device, Swapchain swapchain, VkFormat format, std::vector<VkImageView> &imageViews){
     imageViews.resize(swapchain.imageCount);
 
@@ -146,6 +193,51 @@ void createImageViews(VkDevice device, Swapchain swapchain, VkFormat format, std
         VK_CHECK(vkCreateImageView(device, &createInfo, nullptr, &imageViews[i]));
     }
 } 
+
+void createImage(Image &result, VkDevice device, const VkPhysicalDeviceMemoryProperties &MemoryProperties,
+uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageUsageFlags usage){
+    VkImageCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    createInfo.imageType = VK_IMAGE_TYPE_2D;
+    createInfo.format = format;
+    createInfo.extent = {width, height, 1};
+    createInfo.mipLevels = mipLevels;
+    createInfo.arrayLayers = 1;
+    createInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    createInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    createInfo.usage = usage;
+    createInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkImage image;
+    VK_CHECK_FORCE(vkCreateImage(device, &createInfo, 0, &image));
+
+    VkMemoryRequirements MemoryRequirements;
+    vkGetImageMemoryRequirements(device, image, &MemoryRequirements);
+
+    uint32_t memoryTypeIndex = selectMemoryType(MemoryProperties, MemoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    assert(memoryTypeIndex != ~0u);
+    std::cout << "memIndex: " << memoryTypeIndex << std::endl;
+    VkMemoryAllocateInfo allocateInfo{};
+    allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocateInfo.allocationSize = MemoryRequirements.size;
+    allocateInfo.memoryTypeIndex = memoryTypeIndex;
+
+    VkDeviceMemory memory = 0;
+    VK_CHECK(vkAllocateMemory(device, &allocateInfo, 0, &memory));
+
+    VK_CHECK(vkBindImageMemory(device, image, memory, 0));
+
+    result.image = image;
+    result.imageView = createImageView(device, image, format, 0, mipLevels);
+    result.memory = memory;
+}
+
+void destroyImage(const Image& image, VkDevice device){
+    vkDestroyImageView(device, image.imageView, 0);
+    vkDestroyImage(device, image.image, 0);
+    vkFreeMemory(device, image.memory, 0);
+}
 
 VkCommandPool createCommandPool(VkDevice device, uint32_t familyIndex){
     VkCommandPoolCreateInfo poolInfo{};
@@ -243,10 +335,71 @@ bool loadModel(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, co
     return true;
 }
 
+VkSampler createSampler(VkDevice device, VkFilter filter, VkSamplerMipmapMode mipmapMode,
+     VkSamplerAddressMode addressMode, VkSamplerReductionModeEXT reductionMode){
+    VkSamplerCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    createInfo.magFilter = filter;
+	createInfo.minFilter = filter;
+	createInfo.mipmapMode = mipmapMode;
+	createInfo.addressModeU = addressMode;
+	createInfo.addressModeV = addressMode;
+	createInfo.addressModeW = addressMode;
+	createInfo.minLod = 0;
+	createInfo.maxLod = 16.f;
+	createInfo.anisotropyEnable = mipmapMode == VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	createInfo.maxAnisotropy = mipmapMode == VK_SAMPLER_MIPMAP_MODE_LINEAR ? 4.f : 1.f;
+
+	VkSamplerReductionModeCreateInfoEXT createInfoReduction = { VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO_EXT };
+
+	if (reductionMode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE_EXT)
+	{
+		createInfoReduction.reductionMode = reductionMode;
+
+		createInfo.pNext = &createInfoReduction;
+	}
+
+	VkSampler sampler = 0;
+	VK_CHECK(vkCreateSampler(device, &createInfo, 0, &sampler));
+	return sampler;
+}
+
+uint32_t getImageMipLevels(uint32_t width, uint32_t height){
+    uint32_t result =1;
+    while(width>1||height>1){
+        result++;
+        width /=2;
+        height /=2;
+    }
+
+    return result;
+}
+
+VkImageMemoryBarrier2 createImageBarrier(VkImage image, VkPipelineStageFlags2 srcStageMask, VkAccessFlags2 srcAccessMask,
+    VkImageLayout oldLayout, VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask,
+    VkImageLayout newLayout, VkImageAspectFlags aspectMask, uint32_t baseMipLevel, uint32_t levelCount){
+    VkImageMemoryBarrier2 result{};
+    result.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    result.srcAccessMask = srcAccessMask;
+    result.dstStageMask = dstStageMask;
+    result.dstAccessMask = dstAccessMask;
+    result.oldLayout = oldLayout;
+    result.newLayout = newLayout;
+    result.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    result.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    result.image = image;
+    result.subresourceRange.aspectMask = aspectMask;
+	result.subresourceRange.baseMipLevel = baseMipLevel;
+	result.subresourceRange.levelCount = levelCount;
+	result.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
+
+    return result;
+}
+
 int main(int argc, char *argv[]){
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(800,600,"Cambion",nullptr,nullptr);
+    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH,WINDOW_HEIGHT,"Cambion",nullptr,nullptr);
     assert(window);
 
     VkInstance instance = createInstance();
@@ -290,6 +443,8 @@ int main(int argc, char *argv[]){
         VK_FORMAT_B8G8R8A8_UNORM,
     };
 
+    VkSampler textureSampler = createSampler(device, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE);
+
     VkPipelineRenderingCreateInfo vertBufferInfo{};
     vertBufferInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     vertBufferInfo.colorAttachmentCount = 1;
@@ -301,7 +456,7 @@ int main(int argc, char *argv[]){
     assert(result);
 
     Program mainProgram = createProgram(device, VK_PIPELINE_BIND_POINT_GRAPHICS, {&shaders["vertexshader.vert"],&shaders["fragshader.frag"]},0,0);
-  
+    
     VkPipeline graphicsPipeline = createGraphicsPipeline(device, VK_NULL_HANDLE, vertBufferInfo, mainProgram,{});
  
     VkCommandPool commandPool = createCommandPool(device, familyIndex);
@@ -310,6 +465,10 @@ int main(int argc, char *argv[]){
     for(size_t i=0; i<MAX_FRAMES_IN_FLIGHT; i++){ 
         createCommandBuffer(device, commandPool, commandBuffers[i]);
     }
+
+    VkCommandPool initCommandPool = createCommandPool(device, familyIndex);
+    VkCommandBuffer initCommandBuffer = 0;
+    createCommandBuffer(device, initCommandPool, initCommandBuffer);
    
     VkSemaphore renderFinishedSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkSemaphore imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT];
@@ -327,9 +486,21 @@ int main(int argc, char *argv[]){
     std::vector<uint32_t> indices;
     assert(loadModel(vertices, indices, "assets/crocodile/crocodile.obj"));
 
+
+    glm::mat4 model = glm::mat4(1.0f);
+    glm::mat4 proj = glm::perspective(glm::radians(45.0f),(float)WINDOW_WIDTH/(float)WINDOW_HEIGHT,0.1f,100.0f);
+    glm::mat4 view = glm::lookAt(glm::vec3(4,3,3),glm::vec3(0,0,0),glm::vec3(0,1,0));
+    Camera camera{model, view, proj};
+
+
+
     VkPhysicalDeviceMemoryProperties memoryProperties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
-   
+    
+    // Buffer imageBuffer{};
+    // createBuffer(imageBuffer, device, memoryProperties, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    //     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
     // TODO: figure out how to upload data 
     Buffer vertexBuffer{};
     createBuffer(vertexBuffer, device, memoryProperties, vertices.size()*sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
@@ -345,7 +516,63 @@ int main(int argc, char *argv[]){
     memcpy(indexBuffer.data, indices.data(), sizeof(uint32_t)*indices.size());
     vkUnmapMemory(device, indexBuffer.memory);
 
+    Buffer cameraBuffer{};
+    createBuffer(cameraBuffer, device, memoryProperties, sizeof(camera), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    
+    memcpy(cameraBuffer.data, &camera, sizeof(camera));
+    vkUnmapMemory(device, cameraBuffer.memory);
+
+    printf("Number of vertices: %u Number of Indices: %u\n", vertices.size(),indices.size());
     VkClearColorValue clearColor = {0.3f,0.6f,0.6f,1.0f};
+
+    int texWidth, texHeight, texChannels;
+    stbi_uc* pixels = stbi_load("assets/crocodile/crocodile_diff.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    assert(pixels);
+    
+    VkDeviceSize imageSize = texWidth*texHeight*4;
+    uint32_t miplevels = getImageMipLevels(texWidth, texHeight);
+
+    VkDescriptorBufferInfo bufferInfo{};
+    bufferInfo.buffer = cameraBuffer.buffer;
+    bufferInfo.offset = 0;
+    bufferInfo.range = sizeof(cameraBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    Image textureImage{};
+    createImage(textureImage, device, memoryProperties, texWidth, texHeight, miplevels,
+        VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    
+    memcpy(textureImage.memory, pixels, static_cast<size_t>(imageSize));
+    vkUnmapMemory(device, textureImage.memory);
+    
+    stbi_image_free(pixels);
+
+    vkBeginCommandBuffer(initCommandBuffer, &beginInfo);
+    VkImageMemoryBarrier2 initBarrier = createImageBarrier(textureImage.image,VK_PIPELINE_STAGE_2_NONE,
+        0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR, VK_IMAGE_ASPECT_COLOR_BIT,0,1);
+    
+    VkDependencyInfo depInfoEnd{};
+    depInfoEnd.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depInfoEnd.imageMemoryBarrierCount = 1;
+    depInfoEnd.pImageMemoryBarriers = &initBarrier;
+
+    vkCmdPipelineBarrier2(initCommandBuffer, &depInfoEnd);
+    
+    vkEndCommandBuffer(initCommandBuffer);
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &initCommandBuffer;
+
+    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphicsQueue);
+
+    vkFreeCommandBuffers(device, commandPool, 1, &initCommandBuffer);
+
 
     uint32_t currentFrame = 0;
     while(!glfwWindowShouldClose(window)){
@@ -370,25 +597,14 @@ int main(int argc, char *argv[]){
         
         vkCmdBindPipeline(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,graphicsPipeline);
 
-        VkImageMemoryBarrier2 barrierBegin{};
-        barrierBegin.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        barrierBegin.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
-        barrierBegin.srcAccessMask = 0;
-        barrierBegin.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        barrierBegin.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        barrierBegin.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        barrierBegin.newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR;
-        barrierBegin.image = swapchain.images[imageIndex];
-        barrierBegin.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrierBegin.subresourceRange.baseMipLevel = 0;
-        barrierBegin.subresourceRange.levelCount = 1;
-        barrierBegin.subresourceRange.baseArrayLayer = 0;
-        barrierBegin.subresourceRange.layerCount = 1;
+        VkImageMemoryBarrier2 imageBarrierBegin = createImageBarrier(swapchain.images[imageIndex],VK_PIPELINE_STAGE_2_NONE,
+        0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR, VK_IMAGE_ASPECT_COLOR_BIT,0,1);
 
         VkDependencyInfo depInfoBegin{};
         depInfoBegin.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
         depInfoBegin.imageMemoryBarrierCount = 1;
-        depInfoBegin.pImageMemoryBarriers = &barrierBegin;
+        depInfoBegin.pImageMemoryBarriers = &imageBarrierBegin;
         
         vkCmdPipelineBarrier2(commandBuffers[currentFrame], &depInfoBegin);
         
@@ -431,7 +647,7 @@ int main(int argc, char *argv[]){
        
         vkCmdEndRendering(commandBuffers[currentFrame]);
 
-        VkImageMemoryBarrier2 barrierEnd = barrierBegin;
+        VkImageMemoryBarrier2 barrierEnd = imageBarrierBegin;
         barrierEnd.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
         barrierEnd.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
         barrierEnd.dstStageMask = VK_PIPELINE_STAGE_2_NONE;
@@ -483,9 +699,11 @@ int main(int argc, char *argv[]){
     }
 
     vkDeviceWaitIdle(device);
-
+    vkDestroySampler(device, textureSampler, nullptr);
     destroyBuffer(indexBuffer, device);
     destroyBuffer(vertexBuffer, device);
+    destroyBuffer(cameraBuffer, device);
+    
     for(int i=0;i<MAX_FRAMES_IN_FLIGHT;i++){
         vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
         vkDestroySemaphore(device, renderFinishedSemaphores[i],nullptr);

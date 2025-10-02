@@ -28,13 +28,13 @@ static VkShaderStageFlagBits getShaderStage(SpvExecutionModel _executionModel) {
 static VkDescriptorType getDescriptorType(SpvOp _op) {
     switch (_op) {
     case SpvOpTypeStruct:
-        return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     case SpvOpTypeImage:
-        return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     case SpvOpTypeSampler:
         return VK_DESCRIPTOR_TYPE_SAMPLER;
     case SpvOpTypeSampledImage:
-        return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     case SpvOpTypeAccelerationStructureKHR:
         return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     default:
@@ -501,28 +501,30 @@ std::pair<VkDescriptorPool, VkDescriptorSet> createDescriptorArray(VkDevice _dev
 }
 
 VkDescriptorSetLayout createDescriptorArrayLayout(VkDevice _device) {
-    VkShaderStageFlags stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+    VkShaderStageFlags stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutBinding cameraBinding{};
+    cameraBinding.binding = 0;
+    cameraBinding.descriptorCount = 1;
+    cameraBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    cameraBinding.pImmutableSamplers = VK_NULL_HANDLE;
+    cameraBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
     VkDescriptorSetLayoutBinding setBinding = {};
-    setBinding.binding = 0;
-    setBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    setBinding.descriptorCount = DESCRIPTOR_LIMIT;
+    setBinding.binding = 1;
+    setBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    setBinding.descriptorCount = 1;
     setBinding.stageFlags = stageFlags;
     setBinding.pImmutableSamplers = VK_NULL_HANDLE;
 
-    VkDescriptorBindingFlags bindingFlags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
-        VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
-    VkDescriptorSetLayoutBindingFlagsCreateInfo setBindingFlags{};
-    setBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
-    setBindingFlags.pBindingFlags = &bindingFlags;
-    setBindingFlags.bindingCount = 1;
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings = {cameraBinding, setBinding};
 
     VkDescriptorSetLayoutCreateInfo setCreateInfo{};
     setCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     setCreateInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
-    setCreateInfo.bindingCount = 1;
-    setCreateInfo.pBindings = &setBinding;
-    setCreateInfo.pNext = &setBindingFlags;
+    setCreateInfo.bindingCount = 2;
+    setCreateInfo.pBindings = bindings.data();
+    setCreateInfo.pNext = nullptr;
 
     VkDescriptorSetLayout layout = 0;
     VK_CHECK(vkCreateDescriptorSetLayout(_device, &setCreateInfo, nullptr, &layout));
