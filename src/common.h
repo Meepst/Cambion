@@ -1,9 +1,14 @@
 #pragma once
+
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
+#include <spirv-headers/spirv.h>
 
 #include <glm/vec4.hpp>
 #include <glm/mat4x4.hpp>
@@ -19,9 +24,10 @@
 #include <array>
 #include <unordered_map>
 
-#include "types.h"
 #include "alloc.h"
 #include "arena.h"
+#include "bits.h"
+#include "containers.h"
 
 #define MIN_IMAGE_COUNT 3
 
