@@ -1,6 +1,5 @@
 #include "arena.h"
 #include "defines.h"
-#include <cstdint>
 
 
 Allocator arenaNew(uint64_t minimum_bytes) {
@@ -13,13 +12,13 @@ Allocator arenaNew(uint64_t minimum_bytes) {
     arena->last = 0;
 
     return {
-        .alloc = arenaPush,
-        .dealloc = arenaPop,
+        .alloc = arenaAlloc,
+        .dealloc = arenaDealloc,
         .data = arena
     };
 }
 
-void* arenaPush(Allocator& allocator, uint64_t bytes, uint64_t alignment) {
+void* arenaAlloc(Allocator& allocator, uint64_t bytes, uint64_t alignment) {
     assert(allocator.data != nullptr);
 
     Arena* arena = (Arena*)allocator.data;
@@ -34,6 +33,8 @@ void* arenaPush(Allocator& allocator, uint64_t bytes, uint64_t alignment) {
     return ptr;
 }
 
+void arenaDealloc(Allocator& allocator, uint64_t bytes, ...) {}
+
 void arenaPop(Allocator& allocator, uint64_t bytes, ...) {
     assert(allocator.data != nullptr);
 
@@ -44,15 +45,22 @@ void arenaPop(Allocator& allocator, uint64_t bytes, ...) {
     arena->last -= bytes;
 }
 
+void arenaSetLast(Allocator& allocator, uint64_t new_last) {
+    assert(allocator.data != nullptr);
+
+    Arena* arena = (Arena*)allocator.data;
+    arena->last = new_last;
+}
+
 void arenaReset(Allocator& allocator) {
-    assert(allocator.alloc == arenaPush);
+    assert(allocator.alloc == arenaAlloc);
 
     Arena* arena = (Arena*)allocator.data;
     arena->last = 0;
 }
 
 void arenaFree(Allocator& allocator) {
-    assert(allocator.alloc == arenaPush && allocator.data != nullptr);
+    assert(allocator.alloc == arenaAlloc && allocator.data != nullptr);
 
     Arena* arena = (Arena*)allocator.data; // os memory to free begins at allocator data
     osFree(arena, arena->size);

@@ -1,11 +1,13 @@
 #pragma once
 
+#include "bits.h"
 #include "defines.h"
 
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 
 #if _WIN32
     #include <windows.h>
@@ -40,5 +42,3 @@ struct Allocator {
 // General alloc/dealloc functions, dispatches impl on allocator's function pointer
 void* alloc(Allocator& allocator, uint64_t bytes, uint64_t alignment);
 void dealloc(Allocator& allocator, uint64_t bytes, ...);
-// Round num up to the nearest multiple of to, to should be a multiple of 2
-uint64_t alignPow2(uint64_t num, uint64_t to);
