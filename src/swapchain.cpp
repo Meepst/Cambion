@@ -10,7 +10,7 @@ VkFormat getSwapchainFormat(VkPhysicalDevice physicalDevice, VkSurfaceKHR surfac
 
     if(formatCount == 1 && formats[0].format == VK_FORMAT_UNDEFINED)
         return VK_FORMAT_R8G8B8A8_UNORM;
-    
+
     for(uint32_t i=0;i<formatCount;i++){
         if(formats[i].format == VK_FORMAT_R8G8B8A8_UNORM || formats[i].format == VK_FORMAT_B8G8R8A8_UNORM)
             return formats[i].format;
@@ -37,7 +37,7 @@ VkPresentModeKHR getPresentMode(VkPhysicalDevice physicalDevice, VkSurfaceKHR su
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
-void createSwapchain(Swapchain& result, VkPhysicalDevice physicalDevice, VkDevice device,
+void createSwapchain(Allocator& allocator, Swapchain& result, VkPhysicalDevice physicalDevice, VkDevice device,
      VkSurfaceKHR surface, uint32_t familyIndex, GLFWwindow* window, VkFormat format, VkSwapchainKHR oldSwapchain){
     VkSurfaceCapabilitiesKHR surfaceCapabilities;
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCapabilities));
@@ -48,7 +48,7 @@ void createSwapchain(Swapchain& result, VkPhysicalDevice physicalDevice, VkDevic
 
     VkPresentModeKHR presentMode = getPresentMode(physicalDevice, surface);
 
-    VkCompositeAlphaFlagBitsKHR surfaceComposite = (surfaceCapabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR 
+    VkCompositeAlphaFlagBitsKHR surfaceComposite = (surfaceCapabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
         : (surfaceCapabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) ? VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR
         : (surfaceCapabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR) ? VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR
         : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
@@ -77,29 +77,29 @@ void createSwapchain(Swapchain& result, VkPhysicalDevice physicalDevice, VkDevic
     uint32_t imageCount = 0;
     VK_CHECK(vkGetSwapchainImagesKHR(device, swapchain, &imageCount, 0));
 
-    std::vector<VkImage> images(imageCount);
-    VK_CHECK(vkGetSwapchainImagesKHR(device, swapchain, &imageCount, images.data())); 
+    DynArray<VkImage> images(allocator, imageCount);
+    VK_CHECK(vkGetSwapchainImagesKHR(device, swapchain, &imageCount, images.data()));
 
     result.swapchain = swapchain;
     result.images = images;
     result.imageCount = imageCount;
     result.height = height;
     result.width = width;
-}   
+}
 
-SwapchainStatus updateSwapchain(Swapchain& result, VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
-    uint32_t familyIndex, GLFWwindow* window, VkFormat format){
+SwapchainStatus updateSwapchain(Allocator& allocator, Swapchain& result, VkPhysicalDevice physicalDevice, VkDevice device,
+        VkSurfaceKHR surface, uint32_t familyIndex, GLFWwindow* window, VkFormat format){
     int width = 0;
     int height = 0;
     glfwGetFramebufferSize(window, &width, &height);
 
-    if(width==0||height==0) 
+    if(width==0||height==0)
         return Swapchain_NotReady;
-    if(result.width==width&&result.height==height) 
+    if(result.width==width&&result.height==height)
         return Swapchain_Ready;
 
     Swapchain old = result;
-    createSwapchain(result, physicalDevice, device, surface, familyIndex, window, format, old.swapchain);
+    createSwapchain(allocator, result, physicalDevice, device, surface, familyIndex, window, format, old.swapchain);
     VK_CHECK(vkDeviceWaitIdle(device));
 
     vkDestroySwapchainKHR(device, old.swapchain, 0);

@@ -1,8 +1,9 @@
+#include "arena.h"
 #include "common.h"
 #include "device.h"
 #include "swapchain.h"
 #include "program.h"
-#include <fast_obj.h>
+#include "model.h"
 
 #define _Debug
 
@@ -25,37 +26,6 @@ struct Buffer{
 // const std::vector<uint16_t> indices = {
 //     0,1,2,2,3,0
 // };
-
-struct VertexHash{
-    size_t operator()(const Vertex& ver) const noexcept{
-        auto h1 = std::hash<float>{}(ver.pos.x);
-        auto h2 = std::hash<float>{}(ver.pos.y);
-        auto h3 = std::hash<float>{}(ver.pos.z);
-
-        auto h4 = std::hash<float>{}(ver.color.x);
-        auto h5 = std::hash<float>{}(ver.color.y);
-        auto h6 = std::hash<float>{}(ver.color.z);
-
-        auto h7 = std::hash<float>{}(ver.texCoord.x);
-        auto h8 = std::hash<float>{}(ver.texCoord.y);
-
-        size_t seed = 0;
-        auto hashCombine = [&seed](size_t h) {
-            seed ^= h + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-        };
-
-        hashCombine(h1);
-        hashCombine(h2);
-        hashCombine(h3);
-        hashCombine(h4);
-        hashCombine(h5);
-        hashCombine(h6);
-        hashCombine(h7);
-        hashCombine(h8);
-
-        return seed;
-    }
-};
 
 uint32_t selectMemoryType(const VkPhysicalDeviceMemoryProperties &memoryProperties,
     uint32_t memoryTypeBits, VkMemoryPropertyFlags flags){
@@ -84,7 +54,7 @@ void createBuffer(Buffer &result, VkDevice device, const VkPhysicalDeviceMemoryP
 
     VkBuffer buffer = 0;
     VK_CHECK(vkCreateBuffer(device, &createInfo, 0, &buffer));
-    
+
     VkMemoryRequirements memoryRequirements;
     vkGetBufferMemoryRequirements(device, buffer, &memoryRequirements);
 
@@ -125,8 +95,8 @@ void destroyBuffer(const Buffer& buffer, VkDevice device){
     vkFreeMemory(device, buffer.memory, 0);
 }
 
-void createImageViews(VkDevice device, Swapchain swapchain, VkFormat format, std::vector<VkImageView> &imageViews){
-    imageViews.resize(swapchain.imageCount);
+void createImageViews(Allocator& allocator, VkDevice device, Swapchain swapchain, VkFormat format, DynArray<VkImageView> &imageViews){
+    imageViews.resize(allocator, swapchain.imageCount);
 
     for(size_t i=0;i<swapchain.images.size();i++){
         VkImageViewCreateInfo createInfo{};
@@ -145,7 +115,7 @@ void createImageViews(VkDevice device, Swapchain swapchain, VkFormat format, std
         createInfo.subresourceRange.layerCount = 1;
         VK_CHECK(vkCreateImageView(device, &createInfo, nullptr, &imageViews[i]));
     }
-} 
+}
 
 VkCommandPool createCommandPool(VkDevice device, uint32_t familyIndex){
     VkCommandPoolCreateInfo poolInfo{};
@@ -190,60 +160,9 @@ VkFence createFence(VkDevice device){
     return fence;
 }
 
-bool loadModel(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const char* path){
-    fastObjMesh* obj = fast_obj_read(path);
-    if(!obj){
-        printf("failed to load\n");
-        return false;
-    }
-
-    size_t vertexOffset = 0;
-    size_t indexOffset = 0;
-
-    std::unordered_map<Vertex, uint32_t, VertexHash> uniqueVertices;
-
-    // Vertex : Vec2 pos & Vec3 color
-    for(unsigned int i=0;i<obj->face_count; i++){
-        for(unsigned int j=0;j<obj->face_vertices[i]-2;j++){
-            fastObjIndex indexX = obj->indices[indexOffset];
-            fastObjIndex indexY = obj->indices[indexOffset+j+1];
-            fastObjIndex indexZ = obj->indices[indexOffset+j+2];
-
-            fastObjIndex triIdx[3] = {indexX,indexY,indexZ};
-
-            for(unsigned k=0;k<3;k++){
-                float px = obj->positions[3*triIdx[k].p+0];
-                float py = obj->positions[3*triIdx[k].p+1];
-                float pz = obj->positions[3*triIdx[k].p+2];
-
-                glm::vec3 pos = {px,py,pz};
-                glm::vec3 color = {1.0f,1.0f,0.0f};
-                glm::vec2 texCoord = {0.0f,0.0f};
-
-                if(triIdx[k].t != 0){
-                    float u = obj->texcoords[2*triIdx[k].t+0];
-                    float v = obj->texcoords[2*triIdx[k].t+1];
-                    texCoord = {u,v};
-                }
-
-                Vertex vert = {pos,color,texCoord};
-
-                if(!uniqueVertices.contains(vert)){
-                    uint32_t idx = static_cast<uint32_t>(vertices.size());
-                    uniqueVertices[vert] = idx;
-                    vertices.push_back(vert); 
-                }
-
-                indices.push_back(uniqueVertices[vert]);
-            }
-        }
-        indexOffset += obj->face_vertices[i];
-    }
-
-    return true;
-}
-
 int main(int argc, char *argv[]){
+    Allocator arena = arenaNew((uint64_t)1 << 31);
+
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     GLFWwindow* window = glfwCreateWindow(800,600,"Cambion",nullptr,nullptr);
@@ -251,7 +170,7 @@ int main(int argc, char *argv[]){
 
     VkInstance instance = createInstance();
     VkSurfaceKHR surface = createSurface(instance, window);
-    
+
     VkPhysicalDevice physicalDevices[DEVICE_COUNT];
     uint32_t physicalDeviceCount = DEVICE_COUNT;
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices));
@@ -279,12 +198,12 @@ int main(int argc, char *argv[]){
     vkGetDeviceQueue(device, familyIndex, 0, &graphicsQueue);
 
     VkFormat swapchainFormat = getSwapchainFormat(physicalDevice, surface);
-    
-    Swapchain swapchain;
-    createSwapchain(swapchain, physicalDevice, device, surface, familyIndex, window, swapchainFormat, VK_NULL_HANDLE);
 
-    std::vector<VkImageView> swapchainImageViews;
-    createImageViews(device, swapchain, swapchainFormat, swapchainImageViews);
+    Swapchain swapchain;
+    createSwapchain(arena, swapchain, physicalDevice, device, surface, familyIndex, window, swapchainFormat, VK_NULL_HANDLE);
+
+    DynArray<VkImageView> swapchainImageViews;
+    createImageViews(arena, device, swapchain, swapchainFormat, swapchainImageViews);
 
     const VkFormat vertBufferFormats[] = {
         VK_FORMAT_B8G8R8A8_UNORM,
@@ -301,16 +220,16 @@ int main(int argc, char *argv[]){
     assert(result);
 
     Program mainProgram = createProgram(device, VK_PIPELINE_BIND_POINT_GRAPHICS, {&shaders["vertexshader.vert"],&shaders["fragshader.frag"]},0,0);
-  
+
     VkPipeline graphicsPipeline = createGraphicsPipeline(device, VK_NULL_HANDLE, vertBufferInfo, mainProgram,{});
- 
+
     VkCommandPool commandPool = createCommandPool(device, familyIndex);
-    
+
     VkCommandBuffer commandBuffers[MAX_FRAMES_IN_FLIGHT];
-    for(size_t i=0; i<MAX_FRAMES_IN_FLIGHT; i++){ 
+    for(size_t i=0; i<MAX_FRAMES_IN_FLIGHT; i++){
         createCommandBuffer(device, commandPool, commandBuffers[i]);
     }
-   
+
     VkSemaphore renderFinishedSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkSemaphore imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkFence inFlightFences[MAX_FRAMES_IN_FLIGHT];
@@ -320,21 +239,20 @@ int main(int argc, char *argv[]){
         renderFinishedSemaphores[i] = createSemaphore(device);
         inFlightFences[i] = createFence(device);
     }
-    
- 
+
     // TODO: make scene or model header
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
-    assert(loadModel(vertices, indices, "assets/crocodile/crocodile.obj"));
+    DynArray<Vertex> vertices;
+    DynArray<uint32_t> indices;
+    assert(loadModel(arena, vertices, indices, "assets/crocodile/crocodile.obj"));
 
     VkPhysicalDeviceMemoryProperties memoryProperties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
-   
-    // TODO: figure out how to upload data 
+
+    // TODO: figure out how to upload data
     Buffer vertexBuffer{};
-    createBuffer(vertexBuffer, device, memoryProperties, vertices.size()*sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
+    createBuffer(vertexBuffer, device, memoryProperties, vertices.size()*sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    
+
     memcpy(vertexBuffer.data, vertices.data(), sizeof(Vertex)*vertices.size());
     vkUnmapMemory(device, vertexBuffer.memory);
 
@@ -348,26 +266,27 @@ int main(int argc, char *argv[]){
     VkClearColorValue clearColor = {0.3f,0.6f,0.6f,1.0f};
 
     uint32_t currentFrame = 0;
+    uint64_t alloc_frame_start = ((Arena*)arena.data)->last;
     while(!glfwWindowShouldClose(window)){
         glfwPollEvents();
-    
+
         vkQueueWaitIdle(graphicsQueue);
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
         uint32_t imageIndex = 0;
         vkAcquireNextImageKHR(device, swapchain.swapchain, UINT64_MAX, imageAvailableSemaphores[currentFrame],
             VK_NULL_HANDLE, &imageIndex);
-        
+
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
-    
+
         vkResetCommandBuffer(commandBuffers[currentFrame], 0);
-        
+
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
         VK_CHECK(vkBeginCommandBuffer(commandBuffers[currentFrame],&beginInfo));
-        
+
         vkCmdBindPipeline(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,graphicsPipeline);
 
         VkImageMemoryBarrier2 barrierBegin{};
@@ -389,9 +308,9 @@ int main(int argc, char *argv[]){
         depInfoBegin.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
         depInfoBegin.imageMemoryBarrierCount = 1;
         depInfoBegin.pImageMemoryBarriers = &barrierBegin;
-        
+
         vkCmdPipelineBarrier2(commandBuffers[currentFrame], &depInfoBegin);
-        
+
         // add rendering info
         //need to change this from hard coded value later
         VkRenderingAttachmentInfo vertBufferAttachment{};
@@ -401,7 +320,7 @@ int main(int argc, char *argv[]){
         vertBufferAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         vertBufferAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         vertBufferAttachment.clearValue.color = clearColor;
-        
+
 
         VkRenderingInfo passInfo{};
         passInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -428,7 +347,7 @@ int main(int argc, char *argv[]){
         vkCmdBindVertexBuffers(commandBuffers[currentFrame],0,1,vertexBuffers, offsets);
         vkCmdBindIndexBuffer(commandBuffers[currentFrame], indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT16);
         vkCmdDrawIndexed(commandBuffers[currentFrame],static_cast<uint32_t>(indices.size()), 1,0,0,0);
-       
+
         vkCmdEndRendering(commandBuffers[currentFrame]);
 
         VkImageMemoryBarrier2 barrierEnd = barrierBegin;
@@ -477,9 +396,11 @@ int main(int argc, char *argv[]){
         presentInfo.pImageIndices = &imageIndex;
 
         vkQueuePresentKHR(graphicsQueue, &presentInfo);
-        
+
         // always within [0, MAX_FRAMES_IN_FLIGHT]
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+
+        arenaSetLast(arena, alloc_frame_start);
     }
 
     vkDeviceWaitIdle(device);
@@ -495,8 +416,10 @@ int main(int argc, char *argv[]){
     // for(auto framebuffer : framebuffers)
     //    vkDestroyFramebuffer(device, framebuffer, nullptr);
 
-    for(auto view : swapchainImageViews)
+    for(int i = 0; i < swapchainImageViews.size(); ++i) {
+        VkImageView view = swapchainImageViews[i];
         vkDestroyImageView(device, view, nullptr);
+    }
 
     vkDestroyCommandPool(device, commandPool, nullptr);
     vkDestroyPipeline(device, graphicsPipeline, nullptr);

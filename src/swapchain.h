@@ -9,7 +9,7 @@ enum SwapchainStatus{
 
 struct Swapchain{
     VkSwapchainKHR swapchain;
-    std::vector<VkImage> images;
+    DynArray<VkImage> images;
     uint32_t width, height;
     uint32_t imageCount;
 };
@@ -18,8 +18,8 @@ VkFormat getSwapchainFormat(VkPhysicalDevice physicalDevice, VkSurfaceKHR surfac
 
 VkPresentModeKHR getPresentMode(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface);
 
-void createSwapchain(Swapchain& result, VkPhysicalDevice physicalDevice, VkDevice device,
+void createSwapchain(Allocator& allocator, Swapchain& result, VkPhysicalDevice physicalDevice, VkDevice device,
      VkSurfaceKHR surface, uint32_t familyIndex, GLFWwindow* window, VkFormat format, VkSwapchainKHR oldSwapchain);
-    
-SwapchainStatus updateSwapchain(Swapchain& result, VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
-    uint32_t familyIndex, GLFWwindow* window, VkFormat format);
+
+SwapchainStatus updateSwapchain(Allocator& allocator, Swapchain& result, VkPhysicalDevice physicalDevice, VkDevice device,
+    VkSurfaceKHR surface, uint32_t familyIndex, GLFWwindow* window, VkFormat format);
