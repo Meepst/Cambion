@@ -30,9 +30,6 @@ static VkDescriptorType getDescriptorType(SpvOp _op) {
     case SpvOpTypeStruct:
         return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     case SpvOpTypeImage:
-        return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    case SpvOpTypeSampler:
-        return VK_DESCRIPTOR_TYPE_SAMPLER;
     case SpvOpTypeSampledImage:
         return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     case SpvOpTypeAccelerationStructureKHR:
@@ -471,7 +468,7 @@ bool loadShaders(ShaderSet& shaders, const char* base, const char* path)
 }
 
 std::pair<VkDescriptorPool, VkDescriptorSet> createDescriptorArray(VkDevice _device, VkDescriptorSetLayout _layout, uint32_t _descriptorCount) {
-    VkDescriptorPoolSize poolSize = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, _descriptorCount };
+    VkDescriptorPoolSize poolSize = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, _descriptorCount };
     VkDescriptorPoolCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     createInfo.poolSizeCount = 1;
@@ -506,23 +503,16 @@ VkDescriptorSetLayout createDescriptorArrayLayout(VkDevice _device) {
     VkDescriptorSetLayoutBinding cameraBinding{};
     cameraBinding.binding = 0;
     cameraBinding.descriptorCount = 1;
-    cameraBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    cameraBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     cameraBinding.pImmutableSamplers = VK_NULL_HANDLE;
-    cameraBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    cameraBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    VkDescriptorSetLayoutBinding setBinding = {};
-    setBinding.binding = 1;
-    setBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    setBinding.descriptorCount = 1;
-    setBinding.stageFlags = stageFlags;
-    setBinding.pImmutableSamplers = VK_NULL_HANDLE;
-
-    std::array<VkDescriptorSetLayoutBinding, 2> bindings = {cameraBinding, setBinding};
+    std::array<VkDescriptorSetLayoutBinding, 1> bindings = {cameraBinding};
 
     VkDescriptorSetLayoutCreateInfo setCreateInfo{};
     setCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     setCreateInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
-    setCreateInfo.bindingCount = 2;
+    setCreateInfo.bindingCount = 1;
     setCreateInfo.pBindings = bindings.data();
     setCreateInfo.pNext = nullptr;
 
@@ -596,6 +586,7 @@ VkPipeline createGraphicsPipeline(VkDevice _device, VkPipelineCache _pipelineCac
     for (uint32_t i = 0; i < _renderingInfo.colorAttachmentCount; i++) {
         colorAttachmentStates[i].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        colorAttachmentStates[i].blendEnable = VK_FALSE;
     }
 
     VkPipelineColorBlendStateCreateInfo colorBlendState{};

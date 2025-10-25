@@ -30,7 +30,7 @@ struct Buffer{
     size_t size;
 };
 
-struct alignas(16) Camera{
+struct alignas(16) UniformBufferObject{
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
@@ -312,7 +312,7 @@ bool loadModel(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, co
                 glm::vec3 color = {1.0f,1.0f,0.0f};
                 glm::vec2 texCoord = {0.0f,0.0f};
 
-                if(triIdx[k].t != 0){
+                if(triIdx[k].t >= 0){
                     float u = obj->texcoords[2*triIdx[k].t+0];
                     float v = obj->texcoords[2*triIdx[k].t+1];
                     texCoord = {u,v};
@@ -347,7 +347,7 @@ VkSampler createSampler(VkDevice device, VkFilter filter, VkSamplerMipmapMode mi
 	createInfo.addressModeW = addressMode;
 	createInfo.minLod = 0;
 	createInfo.maxLod = 16.f;
-	createInfo.anisotropyEnable = mipmapMode == VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	createInfo.anisotropyEnable = VK_TRUE;
 	createInfo.maxAnisotropy = mipmapMode == VK_SAMPLER_MIPMAP_MODE_LINEAR ? 4.f : 1.f;
 
 	VkSamplerReductionModeCreateInfoEXT createInfoReduction = { VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO_EXT };
@@ -394,6 +394,115 @@ VkImageMemoryBarrier2 createImageBarrier(VkImage image, VkPipelineStageFlags2 sr
 	result.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
 
     return result;
+} 
+
+void transitionImageLayout(VkDevice device, VkCommandBuffer commandBuffer, VkQueue queue, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels){
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout; 
+    barrier.image = image;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = mipLevels;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    
+    VkPipelineStageFlags srcStage;
+    VkPipelineStageFlags dstStage;
+
+    if(oldLayout == VK_IMAGE_LAYOUT_UNDEFINED &&
+        newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL){
+        printf("pipelin!1\n");
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    }else if(oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+        newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL){
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }else if(oldLayout == VK_IMAGE_LAYOUT_GENERAL &&
+        newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL){
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }else{
+        assert(!"Unknown image layout transition\n");
+    }
+
+    printf("pipelin!\n");
+    vkCmdPipelineBarrier(commandBuffer, srcStage, dstStage, 0,0,0,0,0,1,&barrier);
+}
+
+bool loadTexture(Image& image, VkDevice device, VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue queue, const char* path, uint32_t mipLevels){
+    int texWidth, texHeight, texChannels;
+    stbi_uc* pixels = stbi_load(path, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    if(!pixels){
+        printf("failed to load image: %s\n", path);
+        return false;
+    }
+    VkDeviceSize imageSize = texWidth*texHeight*4; // number of channels RGBA, should change per texture format
+
+    VkPhysicalDeviceMemoryProperties memoryProperties;
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
+
+    Buffer stagingBuffer;
+    createBuffer(stagingBuffer, device, memoryProperties, imageSize,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    memcpy(stagingBuffer.data, pixels, static_cast<size_t>(imageSize));
+    vkUnmapMemory(device, stagingBuffer.memory);
+
+    stbi_image_free(pixels);
+
+    mipLevels = getImageMipLevels(texWidth, texHeight);
+    createImage(image, device, memoryProperties, texWidth, texHeight, mipLevels, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    VkCommandBuffer commandBuffer = 0;
+    createCommandBuffer(device, commandPool, commandBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+    printf("Before transition !\n");
+    transitionImageLayout(device, commandBuffer, queue, image.image, VK_FORMAT_R8G8B8A8_UNORM,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipLevels);
+
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent = {(uint32_t)texWidth, (uint32_t)texHeight, 1};
+    
+    printf("Before image copy !\n");
+    vkCmdCopyBufferToImage(commandBuffer,stagingBuffer.buffer, image.image
+        , VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    
+    printf("Before transition 2\n");
+    transitionImageLayout(device, commandBuffer, queue, image.image,
+        VK_FORMAT_R8G8B8A8_UNORM,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels);
+    
+    vkEndCommandBuffer(commandBuffer);
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    vkQueueSubmit(queue, 1, &submitInfo,0);
+    vkQueueWaitIdle(queue);
+    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+    destroyBuffer(stagingBuffer, device);
+
+    return true;
 }
 
 int main(int argc, char *argv[]){
@@ -443,7 +552,19 @@ int main(int argc, char *argv[]){
         VK_FORMAT_B8G8R8A8_UNORM,
     };
 
-    VkSampler textureSampler = createSampler(device, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE);
+    //VkSampler textureSampler = createSampler(device, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE);
+    VkSampler textureSampler = 0;
+    VkSamplerCreateInfo sampleInfo{};
+    sampleInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampleInfo.magFilter = VK_FILTER_LINEAR;
+    sampleInfo.minFilter = VK_FILTER_LINEAR;
+    sampleInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampleInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampleInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampleInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampleInfo.minLod = 0;
+    sampleInfo.maxLod = 11.f;
+    vkCreateSampler(device, &sampleInfo, nullptr, &textureSampler);
 
     VkPipelineRenderingCreateInfo vertBufferInfo{};
     vertBufferInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
@@ -455,7 +576,8 @@ int main(int argc, char *argv[]){
     bool result = loadShaders(shaders, argv[0], "spirv/");
     assert(result);
 
-    Program mainProgram = createProgram(device, VK_PIPELINE_BIND_POINT_GRAPHICS, {&shaders["vertexshader.vert"],&shaders["fragshader.frag"]},0,0);
+    VkDescriptorSetLayout texSetLayout = createDescriptorArrayLayout(device);
+    Program mainProgram = createProgram(device, VK_PIPELINE_BIND_POINT_GRAPHICS, {&shaders["vertexshader.vert"],&shaders["fragshader.frag"]},sizeof(UniformBufferObject),texSetLayout);
     
     VkPipeline graphicsPipeline = createGraphicsPipeline(device, VK_NULL_HANDLE, vertBufferInfo, mainProgram,{});
  
@@ -466,9 +588,6 @@ int main(int argc, char *argv[]){
         createCommandBuffer(device, commandPool, commandBuffers[i]);
     }
 
-    VkCommandPool initCommandPool = createCommandPool(device, familyIndex);
-    VkCommandBuffer initCommandBuffer = 0;
-    createCommandBuffer(device, initCommandPool, initCommandBuffer);
    
     VkSemaphore renderFinishedSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkSemaphore imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT];
@@ -485,14 +604,23 @@ int main(int argc, char *argv[]){
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     assert(loadModel(vertices, indices, "assets/crocodile/crocodile.obj"));
+    // for(auto& cord : vertices){
+    //     printf("u: %f v: %f\n",cord.texCoord[0],cord.texCoord[1]);
+    // }
+    // for(auto& vert : vertices){
+    //     std::cout << "Color:" << vert.color[0] << vert.color[1] << vert.color[2]
+    //     << "\nX: " << vert.pos[0] << " Y: "<< vert.pos[1] << " Z: " << vert.pos[2]
+    //     << "\ntexX: " << vert.texCoord[0] << "texY: " << vert.texCoord[1] << std::endl;
+    // }
 
-
-    glm::mat4 model = glm::mat4(1.0f);
-    glm::mat4 proj = glm::perspective(glm::radians(45.0f),(float)WINDOW_WIDTH/(float)WINDOW_HEIGHT,0.1f,100.0f);
-    glm::mat4 view = glm::lookAt(glm::vec3(4,3,3),glm::vec3(0,0,0),glm::vec3(0,1,0));
-    Camera camera{model, view, proj};
-
-
+    UniformBufferObject ubo{};
+    ubo.model = glm::scale(glm::mat4(1.0f),glm::vec3(0.02f));
+    ubo.model = glm::translate(ubo.model, glm::vec3(15.0f,16.0f,-10.0f));
+    ubo.view = glm::lookAt(glm::vec3(0.0f,0.0f,5.0f),glm::vec3(0.0f,0.0f,0.0f),
+        glm::vec3(0.0f,1.0f,0.0f));
+    ubo.proj = glm::perspective(glm::radians(45.0f),swapchain.width/(float)
+        swapchain.height,0.1f,100.0f);
+    ubo.proj[1][1] *= -1;
 
     VkPhysicalDeviceMemoryProperties memoryProperties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
@@ -516,70 +644,52 @@ int main(int argc, char *argv[]){
     memcpy(indexBuffer.data, indices.data(), sizeof(uint32_t)*indices.size());
     vkUnmapMemory(device, indexBuffer.memory);
 
-    Buffer cameraBuffer{};
-    createBuffer(cameraBuffer, device, memoryProperties, sizeof(camera), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    
-    memcpy(cameraBuffer.data, &camera, sizeof(camera));
-    vkUnmapMemory(device, cameraBuffer.memory);
+    Buffer uniformBuffer{};
+    createBuffer(uniformBuffer, device, memoryProperties, sizeof(ubo),
+    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    memcpy(uniformBuffer.data, &ubo, sizeof(ubo));
+    vkUnmapMemory(device, uniformBuffer.memory);
+
 
     printf("Number of vertices: %u Number of Indices: %u\n", vertices.size(),indices.size());
     VkClearColorValue clearColor = {0.3f,0.6f,0.6f,1.0f};
 
-    int texWidth, texHeight, texChannels;
-    stbi_uc* pixels = stbi_load("assets/crocodile/crocodile_diff.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-    assert(pixels);
+    VkCommandPool initCommandPool = createCommandPool(device, familyIndex);
+
+    printf("gulp! \n");
+    Image textureImage;
+    const char* texturePath = "assets/crocodile/crocodile_diff.jpg";
+    uint32_t texMipLevels = 0;
+    loadTexture(textureImage, device, physicalDevice, initCommandPool, graphicsQueue, texturePath, texMipLevels);
+    printf("wow! \n");
+    std::pair<VkDescriptorPool, VkDescriptorSet> textureSet = createDescriptorArray(device, texSetLayout, 1);
+
+    vkDestroyCommandPool(device, initCommandPool, 0);
     
-    VkDeviceSize imageSize = texWidth*texHeight*4;
-    uint32_t miplevels = getImageMipLevels(texWidth, texHeight);
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageView = textureImage.imageView;
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfo.sampler = textureSampler;
 
-    VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = cameraBuffer.buffer;
-    bufferInfo.offset = 0;
-    bufferInfo.range = sizeof(cameraBuffer);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    Image textureImage{};
-    createImage(textureImage, device, memoryProperties, texWidth, texHeight, miplevels,
-        VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-    
-    memcpy(textureImage.memory, pixels, static_cast<size_t>(imageSize));
-    vkUnmapMemory(device, textureImage.memory);
-    
-    stbi_image_free(pixels);
-
-    vkBeginCommandBuffer(initCommandBuffer, &beginInfo);
-    VkImageMemoryBarrier2 initBarrier = createImageBarrier(textureImage.image,VK_PIPELINE_STAGE_2_NONE,
-        0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR, VK_IMAGE_ASPECT_COLOR_BIT,0,1);
-    
-    VkDependencyInfo depInfoEnd{};
-    depInfoEnd.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    depInfoEnd.imageMemoryBarrierCount = 1;
-    depInfoEnd.pImageMemoryBarriers = &initBarrier;
-
-    vkCmdPipelineBarrier2(initCommandBuffer, &depInfoEnd);
-    
-    vkEndCommandBuffer(initCommandBuffer);
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &initCommandBuffer;
-
-    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(graphicsQueue);
-
-    vkFreeCommandBuffers(device, commandPool, 1, &initCommandBuffer);
-
+    VkWriteDescriptorSet descWrite{};
+    descWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descWrite.dstSet = textureSet.second;
+    descWrite.dstBinding = 0;
+    descWrite.dstArrayElement = 0;
+    descWrite.descriptorCount = 1;
+    descWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descWrite.pImageInfo = &imageInfo;
+   
+    printf("Descript! \n");
+    vkUpdateDescriptorSets(device, 1, &descWrite, 0, 0);
 
     uint32_t currentFrame = 0;
     while(!glfwWindowShouldClose(window)){
         glfwPollEvents();
     
         vkQueueWaitIdle(graphicsQueue);
-        vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+        VK_CHECK(vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX));
 
         uint32_t imageIndex = 0;
         vkAcquireNextImageKHR(device, swapchain.swapchain, UINT64_MAX, imageAvailableSemaphores[currentFrame],
@@ -610,13 +720,13 @@ int main(int argc, char *argv[]){
         
         // add rendering info
         //need to change this from hard coded value later
-        VkRenderingAttachmentInfo vertBufferAttachment{};
-        vertBufferAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        vertBufferAttachment.imageView = swapchainImageViews[imageIndex];
-        vertBufferAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
-        vertBufferAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        vertBufferAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        vertBufferAttachment.clearValue.color = clearColor;
+        VkRenderingAttachmentInfo renderAttachment{};
+        renderAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        renderAttachment.imageView = swapchainImageViews[imageIndex];
+        renderAttachment.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        renderAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        renderAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        renderAttachment.clearValue.color = clearColor;
         
 
         VkRenderingInfo passInfo{};
@@ -625,11 +735,13 @@ int main(int argc, char *argv[]){
         passInfo.renderArea.extent.height = swapchain.height;
         passInfo.layerCount = 1;
         passInfo.colorAttachmentCount = 1;
-        passInfo.pColorAttachments = &vertBufferAttachment;
+        passInfo.pColorAttachments = &renderAttachment;
         passInfo.pDepthAttachment = VK_NULL_HANDLE; // need to add later
 
         vkCmdBeginRendering(commandBuffers[currentFrame], &passInfo);
-
+        
+        vkCmdPushConstants(commandBuffers[currentFrame],mainProgram.layout,VK_SHADER_STAGE_VERTEX_BIT,0,sizeof(ubo),&ubo);
+            
         VkViewport viewport = { 0, 0, float(swapchain.width), float(swapchain.height), 0, 1 };
 		VkRect2D scissor = { { 0, 0 }, { uint32_t(swapchain.width), uint32_t(swapchain.height) } };
 
@@ -638,11 +750,14 @@ int main(int argc, char *argv[]){
 
         vkCmdSetCullMode(commandBuffers[currentFrame], VK_CULL_MODE_NONE);
         vkCmdSetDepthBias(commandBuffers[currentFrame], 0.0,0.0, 1.0);
-
+        
+        vkCmdBindDescriptorSets(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,
+            mainProgram.layout,0,1,&textureSet.second,0,nullptr);
+    
         VkBuffer vertexBuffers[] = {vertexBuffer.buffer};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(commandBuffers[currentFrame],0,1,vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(commandBuffers[currentFrame], indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT16);
+        vkCmdBindIndexBuffer(commandBuffers[currentFrame], indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(commandBuffers[currentFrame],static_cast<uint32_t>(indices.size()), 1,0,0,0);
        
         vkCmdEndRendering(commandBuffers[currentFrame]);
@@ -650,10 +765,16 @@ int main(int argc, char *argv[]){
         VkImageMemoryBarrier2 barrierEnd = imageBarrierBegin;
         barrierEnd.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
         barrierEnd.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        barrierEnd.dstStageMask = VK_PIPELINE_STAGE_2_NONE;
+        barrierEnd.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
         barrierEnd.dstAccessMask = 0;
         barrierEnd.oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR;
         barrierEnd.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        barrierEnd.image = swapchain.images[imageIndex];
+        barrierEnd.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrierEnd.subresourceRange.baseMipLevel = 0;
+        barrierEnd.subresourceRange.levelCount = 1;
+        barrierEnd.subresourceRange.baseArrayLayer = 0;
+        barrierEnd.subresourceRange.layerCount = 1;
 
         VkDependencyInfo depInfoEnd{};
         depInfoEnd.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -661,6 +782,7 @@ int main(int argc, char *argv[]){
         depInfoEnd.pImageMemoryBarriers = &barrierEnd;
 
         vkCmdPipelineBarrier2(commandBuffers[currentFrame], &depInfoEnd);
+
 
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -702,16 +824,18 @@ int main(int argc, char *argv[]){
     vkDestroySampler(device, textureSampler, nullptr);
     destroyBuffer(indexBuffer, device);
     destroyBuffer(vertexBuffer, device);
-    destroyBuffer(cameraBuffer, device);
-    
+    destroyBuffer(uniformBuffer, device);
+
+    vkDestroyDescriptorPool(device, textureSet.first, nullptr);
+    vkDestroyDescriptorSetLayout(device, texSetLayout, nullptr);
+
     for(int i=0;i<MAX_FRAMES_IN_FLIGHT;i++){
         vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
         vkDestroySemaphore(device, renderFinishedSemaphores[i],nullptr);
         vkDestroyFence(device, inFlightFences[i], nullptr);
     }
 
-    // for(auto framebuffer : framebuffers)
-    //    vkDestroyFramebuffer(device, framebuffer, nullptr);
+    destroyImage(textureImage, device);
 
     for(auto view : swapchainImageViews)
         vkDestroyImageView(device, view, nullptr);
