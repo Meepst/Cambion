@@ -21,7 +21,7 @@
 #include "alloc.h"
 #include "arena.h"
 
-#define MIN_IMAGE_COUNT 3
+#define MIN_IMAGE_COUNT 2
 
 // Vulkan assert macro for all vkCreate functions
 #define VK_CHECK(call) \

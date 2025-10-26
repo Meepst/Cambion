@@ -586,7 +586,7 @@ VkPipeline createGraphicsPipeline(VkDevice _device, VkPipelineCache _pipelineCac
     for (uint32_t i = 0; i < _renderingInfo.colorAttachmentCount; i++) {
         colorAttachmentStates[i].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        colorAttachmentStates[i].blendEnable = VK_FALSE;
+        colorAttachmentStates[i].blendEnable = VK_TRUE;
     }
 
     VkPipelineColorBlendStateCreateInfo colorBlendState{};

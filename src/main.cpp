@@ -460,7 +460,8 @@ bool loadTexture(Image& image, VkDevice device, VkPhysicalDevice physicalDevice,
     stbi_image_free(pixels);
 
     mipLevels = getImageMipLevels(texWidth, texHeight);
-    createImage(image, device, memoryProperties, texWidth, texHeight, mipLevels, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    createImage(image, device, memoryProperties, texWidth, texHeight, mipLevels, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | 
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT  | VK_IMAGE_USAGE_SAMPLED_BIT);
 
     VkCommandBuffer commandBuffer = 0;
     createCommandBuffer(device, commandPool, commandBuffer);
@@ -486,10 +487,83 @@ bool loadTexture(Image& image, VkDevice device, VkPhysicalDevice physicalDevice,
     vkCmdCopyBufferToImage(commandBuffer,stagingBuffer.buffer, image.image
         , VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
     
-    printf("Before transition 2\n");
-    transitionImageLayout(device, commandBuffer, queue, image.image,
-        VK_FORMAT_R8G8B8A8_UNORM,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels);
+    VkImageMemoryBarrier2 mipMapBarrier{};
+    mipMapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    mipMapBarrier.image = image.image;
+    mipMapBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    mipMapBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    mipMapBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    mipMapBarrier.subresourceRange.baseArrayLayer = 0;
+    mipMapBarrier.subresourceRange.layerCount = 1;
+    mipMapBarrier.subresourceRange.levelCount = 1;
+    
+    VkDependencyInfo depInfo{};
+
+    int32_t mipWidth = texWidth;
+    int32_t mipHeight = texHeight;
+    printf("Mip Levels: %u", mipLevels);
+    for(uint32_t i=1;i<mipLevels;i++){
+        mipMapBarrier.subresourceRange.baseMipLevel = i-1;
+        mipMapBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        mipMapBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        mipMapBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        mipMapBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        mipMapBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        mipMapBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        
+        depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        depInfo.imageMemoryBarrierCount = 1;
+        depInfo.pImageMemoryBarriers = &mipMapBarrier;
+        vkCmdPipelineBarrier2(commandBuffer, &depInfo);
+
+        VkImageBlit blit{};
+        blit.srcOffsets[0] = {0, 0, 0};
+        blit.srcOffsets[1] = {mipWidth, mipHeight, 1};
+        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.mipLevel = i - 1;
+        blit.srcSubresource.baseArrayLayer = 0;
+        blit.srcSubresource.layerCount = 1;
+        blit.dstOffsets[0] = {0, 0, 0};
+        blit.dstOffsets[1] = { mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, 1 };
+        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.mipLevel = i;
+        blit.dstSubresource.baseArrayLayer = 0;
+        blit.dstSubresource.layerCount = 1;
+
+        vkCmdBlitImage(commandBuffer,
+            image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1, &blit,
+            VK_FILTER_LINEAR);
+        
+        mipMapBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        mipMapBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        mipMapBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        mipMapBarrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+        mipMapBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        mipMapBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        
+        depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        depInfo.imageMemoryBarrierCount = 1;
+        depInfo.pImageMemoryBarriers = &mipMapBarrier;
+        vkCmdPipelineBarrier2(commandBuffer, &depInfo);
+        
+        if(mipWidth > 1) mipWidth/=2;
+        if(mipHeight>1) mipHeight/=2;
+    }
+
+    mipMapBarrier.subresourceRange.baseMipLevel = mipLevels-1;
+    mipMapBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    mipMapBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    mipMapBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    mipMapBarrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+    mipMapBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    mipMapBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+
+    depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depInfo.imageMemoryBarrierCount = 1;
+    depInfo.pImageMemoryBarriers = &mipMapBarrier;
+    vkCmdPipelineBarrier2(commandBuffer, &depInfo);
     
     vkEndCommandBuffer(commandBuffer);
     VkSubmitInfo submitInfo{};
@@ -704,12 +778,10 @@ int main(int argc, char *argv[]){
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
         VK_CHECK(vkBeginCommandBuffer(commandBuffers[currentFrame],&beginInfo));
-        
-        vkCmdBindPipeline(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,graphicsPipeline);
 
-        VkImageMemoryBarrier2 imageBarrierBegin = createImageBarrier(swapchain.images[imageIndex],VK_PIPELINE_STAGE_2_NONE,
+        VkImageMemoryBarrier2 imageBarrierBegin = createImageBarrier(swapchain.images[imageIndex],VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
         0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR, VK_IMAGE_ASPECT_COLOR_BIT,0,1);
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,0,1);
 
         VkDependencyInfo depInfoBegin{};
         depInfoBegin.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -723,7 +795,7 @@ int main(int argc, char *argv[]){
         VkRenderingAttachmentInfo renderAttachment{};
         renderAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         renderAttachment.imageView = swapchainImageViews[imageIndex];
-        renderAttachment.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        renderAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         renderAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         renderAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         renderAttachment.clearValue.color = clearColor;
@@ -739,6 +811,7 @@ int main(int argc, char *argv[]){
         passInfo.pDepthAttachment = VK_NULL_HANDLE; // need to add later
 
         vkCmdBeginRendering(commandBuffers[currentFrame], &passInfo);
+        vkCmdBindPipeline(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,graphicsPipeline);
         
         vkCmdPushConstants(commandBuffers[currentFrame],mainProgram.layout,VK_SHADER_STAGE_VERTEX_BIT,0,sizeof(ubo),&ubo);
             
@@ -765,9 +838,9 @@ int main(int argc, char *argv[]){
         VkImageMemoryBarrier2 barrierEnd = imageBarrierBegin;
         barrierEnd.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
         barrierEnd.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        barrierEnd.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        barrierEnd.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
         barrierEnd.dstAccessMask = 0;
-        barrierEnd.oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR;
+        barrierEnd.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         barrierEnd.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         barrierEnd.image = swapchain.images[imageIndex];
         barrierEnd.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -788,7 +861,7 @@ int main(int argc, char *argv[]){
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
         VkSemaphore waitSemaphores[] = {imageAvailableSemaphores[currentFrame]};
-        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT};
         submitInfo.waitSemaphoreCount = 1;
         submitInfo.pWaitSemaphores = waitSemaphores;
         submitInfo.pWaitDstStageMask = waitStages;
