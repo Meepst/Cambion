@@ -24,7 +24,7 @@ struct Vertex{
         std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
-        attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[0].offset = offsetof(Vertex, pos);
 
         attributeDescriptions[1].binding = 0;
@@ -177,3 +177,5 @@ std::pair<VkDescriptorPool, VkDescriptorSet> createDescriptorArray(VkDevice _dev
 VkDescriptorSetLayout createDescriptorArrayLayout(VkDevice _device);
 
 VkPipeline createGraphicsPipeline(VkDevice _device, VkPipelineCache _pipelineCache, const VkPipelineRenderingCreateInfo& _renderingInfo, const Program& _program, Constants constants);
+
+Program createSimpleProgram(VkDevice device, VkPipelineBindPoint bindPoint, Shaders shaders, size_t pushConstantSize);

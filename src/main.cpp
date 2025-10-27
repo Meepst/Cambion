@@ -626,20 +626,6 @@ int main(int argc, char *argv[]){
         VK_FORMAT_B8G8R8A8_UNORM,
     };
 
-    //VkSampler textureSampler = createSampler(device, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE);
-    VkSampler textureSampler = 0;
-    VkSamplerCreateInfo sampleInfo{};
-    sampleInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampleInfo.magFilter = VK_FILTER_LINEAR;
-    sampleInfo.minFilter = VK_FILTER_LINEAR;
-    sampleInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampleInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampleInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampleInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    sampleInfo.minLod = 0;
-    sampleInfo.maxLod = 11.f;
-    vkCreateSampler(device, &sampleInfo, nullptr, &textureSampler);
-
     VkPipelineRenderingCreateInfo vertBufferInfo{};
     vertBufferInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     vertBufferInfo.colorAttachmentCount = 1;
@@ -650,9 +636,9 @@ int main(int argc, char *argv[]){
     bool result = loadShaders(shaders, argv[0], "spirv/");
     assert(result);
 
-    VkDescriptorSetLayout texSetLayout = createDescriptorArrayLayout(device);
-    Program mainProgram = createProgram(device, VK_PIPELINE_BIND_POINT_GRAPHICS, {&shaders["vertexshader.vert"],&shaders["fragshader.frag"]},sizeof(UniformBufferObject),texSetLayout);
-    
+    // VkDescriptorSetLayout texSetLayout = createDescriptorArrayLayout(device);
+    // Program mainProgram = createProgram(device, VK_PIPELINE_BIND_POINT_GRAPHICS, {&shaders["vertexshader.vert"],&shaders["fragshader.frag"]},sizeof(UniformBufferObject),texSetLayout);
+    Program mainProgram = createSimpleProgram(device, VK_PIPELINE_BIND_POINT_GRAPHICS,{&shaders["vertexshader.vert"],&shaders["fragshader.frag"]},sizeof(UniformBufferObject));
     VkPipeline graphicsPipeline = createGraphicsPipeline(device, VK_NULL_HANDLE, vertBufferInfo, mainProgram,{});
  
     VkCommandPool commandPool = createCommandPool(device, familyIndex);
@@ -737,26 +723,67 @@ int main(int argc, char *argv[]){
     uint32_t texMipLevels = 0;
     loadTexture(textureImage, device, physicalDevice, initCommandPool, graphicsQueue, texturePath, texMipLevels);
     printf("wow! \n");
-    std::pair<VkDescriptorPool, VkDescriptorSet> textureSet = createDescriptorArray(device, texSetLayout, 1);
+    // std::pair<VkDescriptorPool, VkDescriptorSet> textureSet = createDescriptorArray(device, mainProgram.setLayout, 1);
 
     vkDestroyCommandPool(device, initCommandPool, 0);
+
+
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+
+    VkSampler textureSampler = 0;
+    VkSamplerCreateInfo sampleInfo{};
+    sampleInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampleInfo.magFilter = VK_FILTER_LINEAR;
+    sampleInfo.minFilter = VK_FILTER_LINEAR;
+    sampleInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampleInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampleInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampleInfo.anisotropyEnable = VK_TRUE;
+    sampleInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    sampleInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampleInfo.minLod = 0.0f;
+    sampleInfo.maxLod = VK_LOD_CLAMP_NONE;
+    sampleInfo.mipLodBias = 0.0f;
+    VK_CHECK(vkCreateSampler(device, &sampleInfo, nullptr, &textureSampler));
+   
+    printf("Descript! \n");
+    VkDescriptorPoolSize descPoolSize{};
+    descPoolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descPoolSize.descriptorCount = 10;
+    VkDescriptorPoolCreateInfo descPoolInfo{};
+    descPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descPoolInfo.poolSizeCount = 1;
+    descPoolInfo.pPoolSizes = &descPoolSize;
+    descPoolInfo.maxSets = 10;
+    
+    VkDescriptorPool descPool = 0;
+    VK_CHECK(vkCreateDescriptorPool(device,&descPoolInfo,0,&descPool));
+
+    VkDescriptorSetAllocateInfo descAllocInfo{};
+    descAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descAllocInfo.descriptorPool = descPool;
+    descAllocInfo.descriptorSetCount = 1;
+    descAllocInfo.pSetLayouts = &mainProgram.setLayout;
+
+    VkDescriptorSet descSet = 0;
+    VK_CHECK(vkAllocateDescriptorSets(device, &descAllocInfo,&descSet));
     
     VkDescriptorImageInfo imageInfo{};
+    imageInfo.sampler = textureSampler;
     imageInfo.imageView = textureImage.imageView;
     imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    imageInfo.sampler = textureSampler;
 
     VkWriteDescriptorSet descWrite{};
     descWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descWrite.dstSet = textureSet.second;
+    descWrite.dstSet = descSet;
     descWrite.dstBinding = 0;
     descWrite.dstArrayElement = 0;
     descWrite.descriptorCount = 1;
     descWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     descWrite.pImageInfo = &imageInfo;
-   
-    printf("Descript! \n");
-    vkUpdateDescriptorSets(device, 1, &descWrite, 0, 0);
+
+    vkUpdateDescriptorSets(device,1,&descWrite,0,0);
 
     uint32_t currentFrame = 0;
     while(!glfwWindowShouldClose(window)){
@@ -814,7 +841,9 @@ int main(int argc, char *argv[]){
         vkCmdBindPipeline(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,graphicsPipeline);
         
         vkCmdPushConstants(commandBuffers[currentFrame],mainProgram.layout,VK_SHADER_STAGE_VERTEX_BIT,0,sizeof(ubo),&ubo);
-            
+        vkCmdBindDescriptorSets(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,
+            mainProgram.layout,0,1,&descSet,0,nullptr);
+        
         VkViewport viewport = { 0, 0, float(swapchain.width), float(swapchain.height), 0, 1 };
 		VkRect2D scissor = { { 0, 0 }, { uint32_t(swapchain.width), uint32_t(swapchain.height) } };
 
@@ -824,8 +853,8 @@ int main(int argc, char *argv[]){
         vkCmdSetCullMode(commandBuffers[currentFrame], VK_CULL_MODE_NONE);
         vkCmdSetDepthBias(commandBuffers[currentFrame], 0.0,0.0, 1.0);
         
-        vkCmdBindDescriptorSets(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,
-            mainProgram.layout,0,1,&textureSet.second,0,nullptr);
+        //vkCmdBindDescriptorSets(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,
+           //mainProgram.layout,0,1,&textureSet.second,0,nullptr);
     
         VkBuffer vertexBuffers[] = {vertexBuffer.buffer};
         VkDeviceSize offsets[] = {0};
@@ -855,32 +884,43 @@ int main(int argc, char *argv[]){
         depInfoEnd.pImageMemoryBarriers = &barrierEnd;
 
         vkCmdPipelineBarrier2(commandBuffers[currentFrame], &depInfoEnd);
-
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-
-        VkSemaphore waitSemaphores[] = {imageAvailableSemaphores[currentFrame]};
-        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT};
-        submitInfo.waitSemaphoreCount = 1;
-        submitInfo.pWaitSemaphores = waitSemaphores;
-        submitInfo.pWaitDstStageMask = waitStages;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
-
-        VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
-        submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = signalSemaphores;
-
         vkEndCommandBuffer(commandBuffers[currentFrame]);
 
-        VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]));
+        VkSemaphoreSubmitInfo waitSemaphoreInfo{};
+        waitSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        waitSemaphoreInfo.semaphore = imageAvailableSemaphores[currentFrame];
+        waitSemaphoreInfo.value = 0;
+        waitSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        waitSemaphoreInfo.deviceIndex = 0;
+
+        VkCommandBufferSubmitInfo cmdBuffInfo{};
+        cmdBuffInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+        cmdBuffInfo.commandBuffer = commandBuffers[currentFrame];
+        cmdBuffInfo.deviceMask = 1;
+        
+        VkSemaphoreSubmitInfo signalSemaphoreInfo{};
+        signalSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        signalSemaphoreInfo.semaphore = renderFinishedSemaphores[currentFrame];
+        signalSemaphoreInfo.value = 0;
+        signalSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+        signalSemaphoreInfo.deviceIndex = 0;
+
+        VkSubmitInfo2 submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+        submitInfo.waitSemaphoreInfoCount = 1;
+        submitInfo.pWaitSemaphoreInfos = &waitSemaphoreInfo;
+        submitInfo.signalSemaphoreInfoCount = 1;
+        submitInfo.pSignalSemaphoreInfos = &signalSemaphoreInfo;
+        submitInfo.commandBufferInfoCount = 1;
+        submitInfo.pCommandBufferInfos = &cmdBuffInfo;
+
+        VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]));
 
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
         presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = signalSemaphores;
+        presentInfo.pWaitSemaphores = &renderFinishedSemaphores[currentFrame];
 
         VkSwapchainKHR swapchains[] = {swapchain.swapchain};
         presentInfo.swapchainCount = 1;
@@ -899,8 +939,10 @@ int main(int argc, char *argv[]){
     destroyBuffer(vertexBuffer, device);
     destroyBuffer(uniformBuffer, device);
 
-    vkDestroyDescriptorPool(device, textureSet.first, nullptr);
-    vkDestroyDescriptorSetLayout(device, texSetLayout, nullptr);
+    vkDestroyDescriptorPool(device, descPool,0);
+
+    // vkDestroyDescriptorPool(device, textureSet.first, nullptr);
+    // vkDestroyDescriptorSetLayout(device, texSetLayout, nullptr);
 
     for(int i=0;i<MAX_FRAMES_IN_FLIGHT;i++){
         vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);

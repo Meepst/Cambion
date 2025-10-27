@@ -28,10 +28,13 @@ static VkShaderStageFlagBits getShaderStage(SpvExecutionModel _executionModel) {
 static VkDescriptorType getDescriptorType(SpvOp _op) {
     switch (_op) {
     case SpvOpTypeStruct:
-        return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     case SpvOpTypeImage:
+        return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    case SpvOpTypeSampler:
+        return VK_DESCRIPTOR_TYPE_SAMPLER;
     case SpvOpTypeSampledImage:
-        return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     case SpvOpTypeAccelerationStructureKHR:
         return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     default:
@@ -370,11 +373,9 @@ Program createProgram(VkDevice _device, VkPipelineBindPoint _bindPoint, Shaders 
     program.layout = createPipelineLayout(_device, program.setLayout, _arrayLayout, pushConstantStages, _pushConstantSize);
     assert(program.layout);
 
-    std::cout << program.pushDescriptorCount << std::endl;
-    if(program.pushDescriptorCount > 0){
-        program.updateTemplate = createUpdateTemplate(_device, program.bindPoint, program.layout, _shaders, &program.pushDescriptorCount);
-        assert(program.updateTemplate);
-    }
+    program.updateTemplate = createUpdateTemplate(_device, program.bindPoint, program.layout, _shaders, &program.pushDescriptorCount);
+    assert(program.updateTemplate);
+    
 
     program.pushConstantStages = pushConstantStages;
     program.pushConstantSize = uint32_t(_pushConstantSize);
@@ -390,6 +391,91 @@ Program createProgram(VkDevice _device, VkPipelineBindPoint _bindPoint, Shaders 
     program.shaderCount = 0;
 
     for (const Shader* shader : _shaders) {
+        program.shaders[program.shaderCount++] = shader;
+    }
+
+    return program;
+}
+
+Program createSimpleProgram(VkDevice device, VkPipelineBindPoint bindPoint, Shaders shaders, size_t pushConstantSize){
+    VkShaderStageFlags pushConstantStages = 0;
+    for (const Shader* shader : shaders) {
+        if (shader->needPushConstants)
+            pushConstantStages |= shader->stage;
+    }
+
+    Program program{};
+    // create descriptor set layout
+    VkDescriptorSetLayoutBinding textureBinding{};
+    textureBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    textureBinding.binding = 0;
+    textureBinding.descriptorCount = 1;
+    textureBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    textureBinding.pImmutableSamplers = VK_NULL_HANDLE;
+
+    VkDescriptorSetLayoutCreateInfo descSetLayoutInfo{};
+    descSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descSetLayoutInfo.flags = 0;
+    descSetLayoutInfo.bindingCount = 1;
+    descSetLayoutInfo.pBindings = &textureBinding;
+    
+    VkDescriptorSetLayout descSetLayout = 0;
+    VK_CHECK(vkCreateDescriptorSetLayout(device,&descSetLayoutInfo,0,&descSetLayout));
+    program.setLayout = descSetLayout;
+
+    // create pipeline layout
+    VkPipelineLayoutCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    createInfo.setLayoutCount = 1;
+    createInfo.pSetLayouts = &descSetLayout;
+
+    VkPushConstantRange pushConstantRange = {};
+    if (pushConstantSize) {
+        pushConstantRange.stageFlags = pushConstantStages;
+        pushConstantRange.size = uint32_t(pushConstantSize);
+
+        createInfo.pushConstantRangeCount = 1;
+        createInfo.pPushConstantRanges = &pushConstantRange;
+    }
+
+    VkPipelineLayout layout = 0;
+    VK_CHECK(vkCreatePipelineLayout(device, &createInfo, nullptr, &layout));
+    program.layout = layout;
+
+    // make update template
+    // VkDescriptorUpdateTemplateEntry templateEntry{};
+    // templateEntry.dstBinding = 0;
+    // templateEntry.dstArrayElement = 0;
+    // templateEntry.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    // templateEntry.offset = 0;
+    // templateEntry.stride = sizeof(VkDescriptorImageInfo);
+
+    // VkDescriptorUpdateTemplateCreateInfo templateInfo{};
+    // templateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO;
+    // templateInfo.descriptorUpdateEntryCount = 1;
+    // templateInfo.pDescriptorUpdateEntries = &templateEntry;
+    // templateInfo.pipelineLayout = layout;
+    // templateInfo.pipelineBindPoint = bindPoint;
+    // templateInfo.set = 0;
+    // templateInfo.templateType = VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_PUSH_DESCRIPTORS;
+
+    // VkDescriptorUpdateTemplate descriptorTemplate;
+    // VK_CHECK(vkCreateDescriptorUpdateTemplate(device,&templateInfo,0,&descriptorTemplate));
+    program.updateTemplate = VK_NULL_HANDLE;
+    program.pushConstantStages = pushConstantStages;
+    program.pushConstantSize = uint32_t(pushConstantSize);
+
+    const Shader* shader = shaders.size() == 1 ? *shaders.begin() : nullptr;
+    if (shader && shader->stage == VK_SHADER_STAGE_COMPUTE_BIT) {
+        program.localSizeX = shader->localSizeX;
+        program.localSizeY = shader->localSizeY;
+        program.localSizeZ = shader->localSizeZ;
+    }
+
+    memset(program.shaders, 0, sizeof(program.shaders));
+    program.shaderCount = 0;
+
+    for (const Shader* shader : shaders) {
         program.shaders[program.shaderCount++] = shader;
     }
 
@@ -468,7 +554,7 @@ bool loadShaders(ShaderSet& shaders, const char* base, const char* path)
 }
 
 std::pair<VkDescriptorPool, VkDescriptorSet> createDescriptorArray(VkDevice _device, VkDescriptorSetLayout _layout, uint32_t _descriptorCount) {
-    VkDescriptorPoolSize poolSize = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, _descriptorCount };
+    VkDescriptorPoolSize poolSize = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, _descriptorCount };
     VkDescriptorPoolCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     createInfo.poolSizeCount = 1;
@@ -498,23 +584,28 @@ std::pair<VkDescriptorPool, VkDescriptorSet> createDescriptorArray(VkDevice _dev
 }
 
 VkDescriptorSetLayout createDescriptorArrayLayout(VkDevice _device) {
-    VkShaderStageFlags stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkShaderStageFlags stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
-    VkDescriptorSetLayoutBinding cameraBinding{};
-    cameraBinding.binding = 0;
-    cameraBinding.descriptorCount = 1;
-    cameraBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    cameraBinding.pImmutableSamplers = VK_NULL_HANDLE;
-    cameraBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutBinding setBinding = {};
+    setBinding.binding = 0;
+    setBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    setBinding.descriptorCount = DESCRIPTOR_LIMIT;
+    setBinding.stageFlags = stageFlags;
+    setBinding.pImmutableSamplers = VK_NULL_HANDLE;
 
-    std::array<VkDescriptorSetLayoutBinding, 1> bindings = {cameraBinding};
+    VkDescriptorBindingFlags bindingFlags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
+        VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+    VkDescriptorSetLayoutBindingFlagsCreateInfo setBindingFlags{};
+    setBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+    setBindingFlags.pBindingFlags = &bindingFlags;
+    setBindingFlags.bindingCount = 1;
 
     VkDescriptorSetLayoutCreateInfo setCreateInfo{};
     setCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     setCreateInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
     setCreateInfo.bindingCount = 1;
-    setCreateInfo.pBindings = bindings.data();
-    setCreateInfo.pNext = nullptr;
+    setCreateInfo.pBindings = &setBinding;
+    setCreateInfo.pNext = &setBindingFlags;
 
     VkDescriptorSetLayout layout = 0;
     VK_CHECK(vkCreateDescriptorSetLayout(_device, &setCreateInfo, nullptr, &layout));
@@ -586,7 +677,6 @@ VkPipeline createGraphicsPipeline(VkDevice _device, VkPipelineCache _pipelineCac
     for (uint32_t i = 0; i < _renderingInfo.colorAttachmentCount; i++) {
         colorAttachmentStates[i].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        colorAttachmentStates[i].blendEnable = VK_TRUE;
     }
 
     VkPipelineColorBlendStateCreateInfo colorBlendState{};

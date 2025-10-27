@@ -62,7 +62,7 @@ void createSwapchain(Swapchain& result, VkPhysicalDevice physicalDevice, VkDevic
     createInfo.imageExtent.width = width;
     createInfo.imageExtent.height = height;
     createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     createInfo.queueFamilyIndexCount = 1;
     createInfo.pQueueFamilyIndices = &familyIndex;
