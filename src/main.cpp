@@ -336,7 +336,7 @@ bool loadModel(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, co
 }
 
 VkSampler createSampler(VkDevice device, VkFilter filter, VkSamplerMipmapMode mipmapMode,
-     VkSamplerAddressMode addressMode, VkSamplerReductionModeEXT reductionMode){
+     VkSamplerAddressMode addressMode){
     VkSamplerCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     createInfo.magFilter = filter;
@@ -345,19 +345,10 @@ VkSampler createSampler(VkDevice device, VkFilter filter, VkSamplerMipmapMode mi
 	createInfo.addressModeU = addressMode;
 	createInfo.addressModeV = addressMode;
 	createInfo.addressModeW = addressMode;
-	createInfo.minLod = 0;
-	createInfo.maxLod = 16.f;
+	createInfo.minLod = 0.f;
+	createInfo.maxLod = 11.f;
 	createInfo.anisotropyEnable = VK_TRUE;
 	createInfo.maxAnisotropy = mipmapMode == VK_SAMPLER_MIPMAP_MODE_LINEAR ? 4.f : 1.f;
-
-	VkSamplerReductionModeCreateInfoEXT createInfoReduction = { VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO_EXT };
-
-	if (reductionMode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE_EXT)
-	{
-		createInfoReduction.reductionMode = reductionMode;
-
-		createInfo.pNext = &createInfoReduction;
-	}
 
 	VkSampler sampler = 0;
 	VK_CHECK(vkCreateSampler(device, &createInfo, 0, &sampler));
@@ -404,7 +395,7 @@ void transitionImageLayout(VkDevice device, VkCommandBuffer commandBuffer, VkQue
     barrier.image = image;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.aspectMask = format == VK_FORMAT_D32_SFLOAT ? VK_IMAGE_ASPECT_DEPTH_BIT: VK_IMAGE_ASPECT_COLOR_BIT;
     barrier.subresourceRange.baseMipLevel = 0;
     barrier.subresourceRange.levelCount = mipLevels;
     barrier.subresourceRange.baseArrayLayer = 0;
@@ -432,6 +423,12 @@ void transitionImageLayout(VkDevice device, VkCommandBuffer commandBuffer, VkQue
         barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
         srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }else if(oldLayout == VK_IMAGE_LAYOUT_UNDEFINED &&
+        newLayout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL){
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        dstStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     }else{
         assert(!"Unknown image layout transition\n");
     }
@@ -622,6 +619,14 @@ int main(int argc, char *argv[]){
     std::vector<VkImageView> swapchainImageViews;
     createImageViews(device, swapchain, swapchainFormat, swapchainImageViews);
 
+    VkPhysicalDeviceMemoryProperties memoryProperties;
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
+
+    VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
+    Image depthImage = {};
+    createImage(depthImage,device, memoryProperties,swapchain.width,swapchain.height,1,
+        depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
     const VkFormat vertBufferFormats[] = {
         VK_FORMAT_B8G8R8A8_UNORM,
     };
@@ -630,7 +635,7 @@ int main(int argc, char *argv[]){
     vertBufferInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     vertBufferInfo.colorAttachmentCount = 1;
     vertBufferInfo.pColorAttachmentFormats = vertBufferFormats;
-    vertBufferInfo.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
+    vertBufferInfo.depthAttachmentFormat = depthFormat;
 
     ShaderSet shaders;
     bool result = loadShaders(shaders, argv[0], "spirv/");
@@ -679,11 +684,8 @@ int main(int argc, char *argv[]){
     ubo.view = glm::lookAt(glm::vec3(0.0f,0.0f,5.0f),glm::vec3(0.0f,0.0f,0.0f),
         glm::vec3(0.0f,1.0f,0.0f));
     ubo.proj = glm::perspective(glm::radians(45.0f),swapchain.width/(float)
-        swapchain.height,0.1f,100.0f);
+        swapchain.height,0.1f,10.0f);
     ubo.proj[1][1] *= -1;
-
-    VkPhysicalDeviceMemoryProperties memoryProperties;
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
     
     // Buffer imageBuffer{};
     // createBuffer(imageBuffer, device, memoryProperties, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -727,25 +729,35 @@ int main(int argc, char *argv[]){
 
     vkDestroyCommandPool(device, initCommandPool, 0);
 
+    initCommandPool = createCommandPool(device, familyIndex);
+
+    VkCommandBuffer initCommandBuffer = 0;
+    createCommandBuffer(device, initCommandPool, initCommandBuffer);
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(initCommandBuffer, &beginInfo);
+    
+    transitionImageLayout(device, initCommandBuffer, graphicsQueue,
+        depthImage.image, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        1);
+    
+    vkEndCommandBuffer(initCommandBuffer);
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &initCommandBuffer;
+
+    vkQueueSubmit(graphicsQueue, 1, &submitInfo,0);
+    vkQueueWaitIdle(graphicsQueue);
+    vkFreeCommandBuffers(device, initCommandPool, 1, &initCommandBuffer);
+    vkDestroyCommandPool(device, initCommandPool, 0);
 
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(physicalDevice, &properties);
 
     VkSampler textureSampler = 0;
-    VkSamplerCreateInfo sampleInfo{};
-    sampleInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampleInfo.magFilter = VK_FILTER_LINEAR;
-    sampleInfo.minFilter = VK_FILTER_LINEAR;
-    sampleInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampleInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampleInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampleInfo.anisotropyEnable = VK_TRUE;
-    sampleInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
-    sampleInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    sampleInfo.minLod = 0.0f;
-    sampleInfo.maxLod = VK_LOD_CLAMP_NONE;
-    sampleInfo.mipLodBias = 0.0f;
-    VK_CHECK(vkCreateSampler(device, &sampleInfo, nullptr, &textureSampler));
+    textureSampler = createSampler(device, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR,VK_SAMPLER_ADDRESS_MODE_REPEAT);
    
     printf("Descript! \n");
     VkDescriptorPoolSize descPoolSize{};
@@ -826,7 +838,14 @@ int main(int argc, char *argv[]){
         renderAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         renderAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         renderAttachment.clearValue.color = clearColor;
-        
+
+        VkRenderingAttachmentInfo depthAttachment{};
+        depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        depthAttachment.imageView = depthImage.imageView;
+        depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        depthAttachment.clearValue.depthStencil = {1.0f,0};
 
         VkRenderingInfo passInfo{};
         passInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -835,7 +854,7 @@ int main(int argc, char *argv[]){
         passInfo.layerCount = 1;
         passInfo.colorAttachmentCount = 1;
         passInfo.pColorAttachments = &renderAttachment;
-        passInfo.pDepthAttachment = VK_NULL_HANDLE; // need to add later
+        passInfo.pDepthAttachment = &depthAttachment; // need to add later
 
         vkCmdBeginRendering(commandBuffers[currentFrame], &passInfo);
         vkCmdBindPipeline(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,graphicsPipeline);
@@ -938,6 +957,9 @@ int main(int argc, char *argv[]){
     destroyBuffer(indexBuffer, device);
     destroyBuffer(vertexBuffer, device);
     destroyBuffer(uniformBuffer, device);
+
+    destroyImage(depthImage, device);
+
 
     vkDestroyDescriptorPool(device, descPool,0);
 

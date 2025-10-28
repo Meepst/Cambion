@@ -669,7 +669,7 @@ VkPipeline createGraphicsPipeline(VkDevice _device, VkPipelineCache _pipelineCac
     VkPipelineDepthStencilStateCreateInfo depthStencilState{};
     depthStencilState.depthTestEnable = VK_TRUE;
     depthStencilState.depthWriteEnable = VK_TRUE;
-    depthStencilState.depthCompareOp = VK_COMPARE_OP_GREATER;
+    depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS;
 
     // for deferred rendering :D
     VkPipelineColorBlendAttachmentState colorAttachmentStates[DYNAMIC_COLOR_ATTACHMENT_COUNT] = {};
