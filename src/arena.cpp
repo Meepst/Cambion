@@ -1,40 +1,39 @@
 #include "arena.h"
+#include "defines.h"
 
 
 Allocator arenaNew(uint64_t minimum_bytes) {
     assert(minimum_bytes > 0);
 
-    Arena* arena = (Arena*)calloc(1, sizeof(Arena));
-    if (arena == nullptr) {
-        printf("Error, failed to allocate arena allocator members\n");
-        exit(-1);
-    }
-
-    VirtualMemoryBlock block = osAlloc(minimum_bytes);
-    arena->memory = block.memory;
-    arena->size = block.size;
+    VirtualMemoryBlock block = osAlloc(minimum_bytes + ALLOCATOR_RESERVED_SIZE);
+    Arena* arena = (Arena*)block.memory;
+    arena->memory = (void*)((uintptr_t)block.memory + ALLOCATOR_RESERVED_SIZE);
+    arena->size = block.size - ALLOCATOR_RESERVED_SIZE;
     arena->last = 0;
 
     return {
-        .alloc = arenaPush,
-        .dealloc = arenaPop,
+        .alloc = arenaAlloc,
+        .dealloc = arenaDealloc,
         .data = arena
     };
 }
 
-void* arenaPush(Allocator& allocator, uint64_t bytes, uint64_t alignment) {
+void* arenaAlloc(Allocator& allocator, uint64_t bytes, uint64_t alignment) {
     assert(allocator.data != nullptr);
 
-    bytes = alignPow2(bytes, alignment);
-
     Arena* arena = (Arena*)allocator.data;
-    // Check that the arena does not overflow its own allocated memory
-    assert(((uintptr_t)arena->last + bytes) < (uintptr_t)arena->size);
 
-    void* ptr = (void*)((uintptr_t)arena->memory + (uintptr_t)arena->last);
-    arena->last += bytes;
+    // Round up to alignment
+    uint64_t aligned_start = alignPow2(arena->last, alignment);
+    // Check that the arena does not overflow its own allocated memory
+    assert(aligned_start + bytes < arena->size);
+
+    void* ptr = (void*)((uintptr_t)arena->memory + aligned_start);
+    arena->last = aligned_start + bytes;
     return ptr;
 }
+
+void arenaDealloc(Allocator& allocator, uint64_t bytes, ...) {}
 
 void arenaPop(Allocator& allocator, uint64_t bytes, ...) {
     assert(allocator.data != nullptr);
@@ -42,22 +41,29 @@ void arenaPop(Allocator& allocator, uint64_t bytes, ...) {
     Arena* arena = (Arena*)allocator.data;
     assert(((uintptr_t)arena->last >= bytes));
 
-    void* ptr = (void*)((uintptr_t)arena->memory + (uintptr_t)arena->last);
+    void* ptr = (void*)((uintptr_t)arena->memory + arena->last);
     arena->last -= bytes;
 }
 
+void arenaSetLast(Allocator& allocator, uint64_t new_last) {
+    assert(allocator.data != nullptr);
+
+    Arena* arena = (Arena*)allocator.data;
+    arena->last = new_last;
+}
+
 void arenaReset(Allocator& allocator) {
-    assert(allocator.alloc == arenaPush);
+    assert(allocator.alloc == arenaAlloc);
 
     Arena* arena = (Arena*)allocator.data;
     arena->last = 0;
 }
 
 void arenaFree(Allocator& allocator) {
-    assert(allocator.alloc == arenaPush && allocator.data != nullptr);
+    assert(allocator.alloc == arenaAlloc && allocator.data != nullptr);
 
-    Arena* arena = (Arena*)allocator.data;
-    osFree(arena->memory, arena->size);
+    Arena* arena = (Arena*)allocator.data; // os memory to free begins at allocator data
+    osFree(arena, arena->size);
 
     allocator.alloc = nullptr;
     allocator.dealloc = nullptr;

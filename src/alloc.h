@@ -1,11 +1,13 @@
 #pragma once
 
+#include "bits.h"
 #include "defines.h"
 
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 
 #if _WIN32
     #include <windows.h>
@@ -30,15 +32,13 @@ void osFree(void* memory, uint64_t size);
 
 
 typedef void*(*AllocFnPtr)(Allocator& allocator, uint64_t bytes, uint64_t alignment);
-typedef void(*FreeFnPtr)(Allocator& allocator, uint64_t bytes, ...);
+typedef void(*DeallocFnPtr)(Allocator& allocator, uint64_t bytes, ...);
 
 struct Allocator {
     AllocFnPtr alloc = nullptr;
-    FreeFnPtr dealloc = nullptr;
+    DeallocFnPtr dealloc = nullptr;
     void* data = nullptr;
 };
 // General alloc/dealloc functions, dispatches impl on allocator's function pointer
 void* alloc(Allocator& allocator, uint64_t bytes, uint64_t alignment);
 void dealloc(Allocator& allocator, uint64_t bytes, ...);
-// Round num up to the nearest multiple of to, to should be a multiple of 2
-uint64_t alignPow2(uint64_t num, uint64_t to);
