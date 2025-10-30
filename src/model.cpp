@@ -23,7 +23,7 @@ bool loadModel(Allocator& allocator, DynArray<Vertex>& vertices, DynArray<uint32
 
     // Vertex : Vec3 pos & Vec3 color
     for(unsigned int i=0;i<obj->face_count; i++){
-        for(unsigned int j=0;j<obj->face_vertices[i]-2;j+=3){
+        for(unsigned int j=0;j<obj->face_vertices[i]-2;j++){
             fastObjIndex indexX = obj->indices[indexOffset];
             fastObjIndex indexY = obj->indices[indexOffset+j+1];
             fastObjIndex indexZ = obj->indices[indexOffset+j+2];

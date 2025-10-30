@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.14)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_definitions(_DEBUG DEBUG)
+endif()
+
 project(Cambion)
 
 file(GLOB_RECURSE CPP_SOURCE_FILES "src/*.h" "src/*.cpp")
@@ -46,6 +50,7 @@ endif()
 
 
 set(SPIRV_OUTPUT_DIR "${PROJECT_BINARY_DIR}/$<CONFIG>/spirv/")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/$<CONFIG>")
 foreach(GLSL ${GLSL_SOURCE_FILES})
   get_filename_component(STEM ${GLSL} NAME_WLE)
   set(SPIRV "${SPIRV_OUTPUT_DIR}${STEM}.spv")
