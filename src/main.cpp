@@ -4,6 +4,7 @@
 #include "swapchain.h"
 #include "program.h"
 #include "model.h"
+#include "vulkan/vulkan_core.h"
 
 #include <stb_image.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -38,7 +39,7 @@ struct alignas(16) UniformBufferObject{
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
-};  
+};
 
 struct Image{
     VkImage image;
@@ -128,7 +129,7 @@ VkImageView createImageView(VkDevice device, VkImage image, VkFormat format, uin
     uint32_t levelCount){
     VkImageAspectFlags aspectMask = (format == VK_FORMAT_D32_SFLOAT) ?
         VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-    
+
     VkImageViewCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -165,7 +166,7 @@ void createImageViews(Allocator& allocator, VkDevice device, Swapchain swapchain
         createInfo.subresourceRange.layerCount = 1;
         VK_CHECK(vkCreateImageView(device, &createInfo, nullptr, &imageViews[i]));
     }
-} 
+}
 
 void createImage(Image &result, VkDevice device, const VkPhysicalDeviceMemoryProperties &MemoryProperties,
 uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageUsageFlags usage){
@@ -305,13 +306,13 @@ VkImageMemoryBarrier2 createImageBarrier(VkImage image, VkPipelineStageFlags2 sr
 	result.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
 
     return result;
-} 
+}
 
 void transitionImageLayout(VkDevice device, VkCommandBuffer commandBuffer, VkQueue queue, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels){
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout = oldLayout;
-    barrier.newLayout = newLayout; 
+    barrier.newLayout = newLayout;
     barrier.image = image;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -320,7 +321,7 @@ void transitionImageLayout(VkDevice device, VkCommandBuffer commandBuffer, VkQue
     barrier.subresourceRange.levelCount = mipLevels;
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount = 1;
-    
+
     VkPipelineStageFlags srcStage;
     VkPipelineStageFlags dstStage;
 
@@ -377,7 +378,7 @@ bool loadTexture(Image& image, VkDevice device, VkPhysicalDevice physicalDevice,
     stbi_image_free(pixels);
 
     mipLevels = getImageMipLevels(texWidth, texHeight);
-    createImage(image, device, memoryProperties, texWidth, texHeight, mipLevels, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | 
+    createImage(image, device, memoryProperties, texWidth, texHeight, mipLevels, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT |
         VK_IMAGE_USAGE_TRANSFER_SRC_BIT  | VK_IMAGE_USAGE_SAMPLED_BIT);
 
     VkCommandBuffer commandBuffer = 0;
@@ -399,11 +400,11 @@ bool loadTexture(Image& image, VkDevice device, VkPhysicalDevice physicalDevice,
     region.imageSubresource.baseArrayLayer = 0;
     region.imageSubresource.layerCount = 1;
     region.imageExtent = {(uint32_t)texWidth, (uint32_t)texHeight, 1};
-    
+
     printf("Before image copy !\n");
     vkCmdCopyBufferToImage(commandBuffer,stagingBuffer.buffer, image.image
         , VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    
+
     VkImageMemoryBarrier2 mipMapBarrier{};
     mipMapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
     mipMapBarrier.image = image.image;
@@ -413,7 +414,7 @@ bool loadTexture(Image& image, VkDevice device, VkPhysicalDevice physicalDevice,
     mipMapBarrier.subresourceRange.baseArrayLayer = 0;
     mipMapBarrier.subresourceRange.layerCount = 1;
     mipMapBarrier.subresourceRange.levelCount = 1;
-    
+
     VkDependencyInfo depInfo{};
 
     int32_t mipWidth = texWidth;
@@ -427,7 +428,7 @@ bool loadTexture(Image& image, VkDevice device, VkPhysicalDevice physicalDevice,
         mipMapBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
         mipMapBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
         mipMapBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-        
+
         depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
         depInfo.imageMemoryBarrierCount = 1;
         depInfo.pImageMemoryBarriers = &mipMapBarrier;
@@ -452,19 +453,19 @@ bool loadTexture(Image& image, VkDevice device, VkPhysicalDevice physicalDevice,
             image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             1, &blit,
             VK_FILTER_LINEAR);
-        
+
         mipMapBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         mipMapBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         mipMapBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
         mipMapBarrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
         mipMapBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
         mipMapBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-        
+
         depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
         depInfo.imageMemoryBarrierCount = 1;
         depInfo.pImageMemoryBarriers = &mipMapBarrier;
         vkCmdPipelineBarrier2(commandBuffer, &depInfo);
-        
+
         if(mipWidth > 1) mipWidth/=2;
         if(mipHeight>1) mipHeight/=2;
     }
@@ -481,7 +482,7 @@ bool loadTexture(Image& image, VkDevice device, VkPhysicalDevice physicalDevice,
     depInfo.imageMemoryBarrierCount = 1;
     depInfo.pImageMemoryBarriers = &mipMapBarrier;
     vkCmdPipelineBarrier2(commandBuffer, &depInfo);
-    
+
     vkEndCommandBuffer(commandBuffer);
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -492,6 +493,59 @@ bool loadTexture(Image& image, VkDevice device, VkPhysicalDevice physicalDevice,
     vkQueueWaitIdle(queue);
     vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
     destroyBuffer(stagingBuffer, device);
+
+    return true;
+}
+
+bool loadModelEvil(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const char* path){
+    fastObjMesh* obj = fast_obj_read(path);
+    if(!obj){
+        printf("failed to load\n");
+        return false;
+    }
+
+    size_t vertexOffset = 0;
+    size_t indexOffset = 0;
+
+    std::unordered_map<Vertex, uint32_t, VertexHash> uniqueVertices;
+
+    // Vertex : Vec2 pos & Vec3 color
+    for(unsigned int i=0;i<obj->face_count; i++){
+        for(unsigned int j=0;j<obj->face_vertices[i]-2;j++){
+            fastObjIndex indexX = obj->indices[indexOffset];
+            fastObjIndex indexY = obj->indices[indexOffset+j+1];
+            fastObjIndex indexZ = obj->indices[indexOffset+j+2];
+
+            fastObjIndex triIdx[3] = {indexX,indexY,indexZ};
+
+            for(unsigned k=0;k<3;k++){
+                float px = obj->positions[3*triIdx[k].p+0];
+                float py = obj->positions[3*triIdx[k].p+1];
+                float pz = obj->positions[3*triIdx[k].p+2];
+
+                glm::vec3 pos = {px,py,pz};
+                glm::vec3 color = {1.0f,1.0f,0.0f};
+                glm::vec2 texCoord = {0.0f,0.0f};
+
+                if(triIdx[k].t >= 0){
+                    float u = obj->texcoords[2*triIdx[k].t+0];
+                    float v = obj->texcoords[2*triIdx[k].t+1];
+                    texCoord = {u,v};
+                }
+
+                Vertex vert = {pos,color,texCoord};
+
+                if(!uniqueVertices.contains(vert)){
+                    uint32_t idx = static_cast<uint32_t>(vertices.size());
+                    uniqueVertices[vert] = idx;
+                    vertices.push_back(vert);
+                }
+
+                indices.push_back(uniqueVertices[vert]);
+            }
+        }
+        indexOffset += obj->face_vertices[i];
+    }
 
     return true;
 }
@@ -576,7 +630,7 @@ int main(int argc, char *argv[]){
     }
 
 
-   
+
     VkSemaphore renderFinishedSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkSemaphore imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkFence inFlightFences[MAX_FRAMES_IN_FLIGHT];
@@ -587,10 +641,14 @@ int main(int argc, char *argv[]){
         inFlightFences[i] = createFence(device);
     }
 
-    // TODO: make scene or model header
+   // TODO: make scene or model header
     DynArray<Vertex> vertices;
     DynArray<uint32_t> indices;
-    assert(loadModel(arena, vertices, indices, "assets/crocodile/crocodile.obj"));
+    assert(loadModel(arena, vertices, indices, "assets/sponza/sponza.obj"));
+
+    // std::vector<Vertex> vertices;
+    // std::vector<uint32_t> indices;
+    // assert(loadModelEvil(vertices, indices, "assets/crocodile/crocodile.obj"));
 
     // TODO: figure out how to upload data
     Buffer vertexBuffer{};
@@ -647,11 +705,11 @@ int main(int argc, char *argv[]){
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(initCommandBuffer, &beginInfo);
-    
+
     transitionImageLayout(device, initCommandBuffer, graphicsQueue,
         depthImage.image, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
         1);
-    
+
     vkEndCommandBuffer(initCommandBuffer);
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -668,7 +726,7 @@ int main(int argc, char *argv[]){
 
     VkSampler textureSampler = 0;
     textureSampler = createSampler(device, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR,VK_SAMPLER_ADDRESS_MODE_REPEAT);
-   
+
     printf("Descript! \n");
     VkDescriptorPoolSize descPoolSize{};
     descPoolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -678,7 +736,7 @@ int main(int argc, char *argv[]){
     descPoolInfo.poolSizeCount = 1;
     descPoolInfo.pPoolSizes = &descPoolSize;
     descPoolInfo.maxSets = 10;
-    
+
     VkDescriptorPool descPool = 0;
     VK_CHECK(vkCreateDescriptorPool(device,&descPoolInfo,0,&descPool));
 
@@ -690,7 +748,7 @@ int main(int argc, char *argv[]){
 
     VkDescriptorSet descSet = 0;
     VK_CHECK(vkAllocateDescriptorSets(device, &descAllocInfo,&descSet));
-    
+
     VkDescriptorImageInfo imageInfo{};
     imageInfo.sampler = textureSampler;
     imageInfo.imageView = textureImage.imageView;
@@ -712,12 +770,27 @@ int main(int argc, char *argv[]){
     while(!glfwWindowShouldClose(window)){
         glfwPollEvents();
 
-        vkQueueWaitIdle(graphicsQueue);
+        SwapchainStatus swapchainStatus = updateSwapchain(arena,swapchain,physicalDevice,device,surface,familyIndex,window,swapchainFormat);
+        if(swapchainStatus == Swapchain_NotReady) continue;
+        if(swapchainStatus == Swapchain_Resized){
+            printf("Swapchain: %dx%d\n",swapchain.width,swapchain.height);
+            // later on rebuild gbuffer and depth target images here
+            for(int i=0;i<swapchainImageViews.size();i++){
+                if(swapchainImageViews[i])
+                    vkDestroyImageView(device,swapchainImageViews[i],0);
+                swapchainImageViews[i] = createImageView(device,swapchain.images[i],swapchainFormat,0,1);
+            }
+        }
+
+
         VK_CHECK(vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX));
 
         uint32_t imageIndex = 0;
-        vkAcquireNextImageKHR(device, swapchain.swapchain, UINT64_MAX, imageAvailableSemaphores[currentFrame],
+        VkResult acquireStatus = vkAcquireNextImageKHR(device, swapchain.swapchain, UINT64_MAX, imageAvailableSemaphores[currentFrame],
             VK_NULL_HANDLE, &imageIndex);
+
+        if(acquireStatus == VK_ERROR_OUT_OF_DATE_KHR) continue;
+        assert(acquireStatus == VK_SUCCESS || acquireStatus == VK_SUBOPTIMAL_KHR || acquireStatus == VK_ERROR_OUT_OF_DATE_KHR);
 
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
@@ -737,7 +810,7 @@ int main(int argc, char *argv[]){
         depInfoBegin.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
         depInfoBegin.imageMemoryBarrierCount = 1;
         depInfoBegin.pImageMemoryBarriers = &imageBarrierBegin;
-        
+
         vkCmdPipelineBarrier2(commandBuffers[currentFrame], &depInfoBegin);
 
         // add rendering info
@@ -769,11 +842,11 @@ int main(int argc, char *argv[]){
 
         vkCmdBeginRendering(commandBuffers[currentFrame], &passInfo);
         vkCmdBindPipeline(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,graphicsPipeline);
-        
+
         vkCmdPushConstants(commandBuffers[currentFrame],mainProgram.layout,VK_SHADER_STAGE_VERTEX_BIT,0,sizeof(ubo),&ubo);
         vkCmdBindDescriptorSets(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,
             mainProgram.layout,0,1,&descSet,0,nullptr);
-        
+
         VkViewport viewport = { 0, 0, float(swapchain.width), float(swapchain.height), 0, 1 };
 		VkRect2D scissor = { { 0, 0 }, { uint32_t(swapchain.width), uint32_t(swapchain.height) } };
 
@@ -782,10 +855,10 @@ int main(int argc, char *argv[]){
 
         vkCmdSetCullMode(commandBuffers[currentFrame], VK_CULL_MODE_NONE);
         vkCmdSetDepthBias(commandBuffers[currentFrame], 0.0,0.0, 1.0);
-        
+
         //vkCmdBindDescriptorSets(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,
            //mainProgram.layout,0,1,&textureSet.second,0,nullptr);
-    
+
         VkBuffer vertexBuffers[] = {vertexBuffer.buffer};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(commandBuffers[currentFrame],0,1,vertexBuffers, offsets);
@@ -827,7 +900,7 @@ int main(int argc, char *argv[]){
         cmdBuffInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
         cmdBuffInfo.commandBuffer = commandBuffers[currentFrame];
         cmdBuffInfo.deviceMask = 1;
-        
+
         VkSemaphoreSubmitInfo signalSemaphoreInfo{};
         signalSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
         signalSemaphoreInfo.semaphore = renderFinishedSemaphores[currentFrame];
