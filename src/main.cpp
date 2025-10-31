@@ -9,7 +9,7 @@
 #include <stb_image.h>
 #include <glm/gtc/matrix_transform.hpp>
 
-#define _Debug
+//#define _Debug
 
 #define DEVICE_COUNT 16
 #define MAX_FRAMES_IN_FLIGHT 2
