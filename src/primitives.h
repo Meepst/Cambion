@@ -70,3 +70,21 @@ struct VertexHash{
         return seed;
     }
 };
+
+struct Mesh {
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    uint32_t materialID;
+};
+
+struct TextureImage{
+    VkImage image;
+    VkImageView imageView;
+    VkSampler sampler;
+};
+
+struct Material{
+    glm::vec3 ambient, diffuse, specular, emmission;
+    float shininess, indexOfRefraction, opacity;
+    std::string diffuseMap, normalMap, opacityMap;
+};
