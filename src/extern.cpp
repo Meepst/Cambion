@@ -1,3 +1,6 @@
+#define CGLTF_IMPLEMENTATION
+#include <cgltf.h>
+
 #define FAST_OBJ_IMPLEMENTATION
 #include <fast_obj.h>
 
