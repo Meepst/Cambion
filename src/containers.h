@@ -66,11 +66,9 @@ class DynArray {
 
 
         constexpr T* data() noexcept {
-            assert(pdata != nullptr);
             return pdata;
         }
         constexpr uint64_t size() noexcept {
-            assert(pdata != nullptr);
             return count;
         }
         constexpr T& front() noexcept {
