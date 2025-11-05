@@ -1,62 +1,76 @@
 #include "model.h"
+#include "alloc.h"
+#include "primitives.h"
 
 
-bool loadModel(Allocator& allocator, DynArray<Vertex>& vertices, DynArray<uint32_t>& indices, const char* path){
+bool loadModel(Allocator& allocator,  Model& model, const char* path){
     fastObjMesh* obj = fast_obj_read(path);
     if(!obj){
         printf("failed to load\n");
         return false;
     }
 
-    int indices_reserved = 0;
-    for(int i = 0; i < obj->face_count; ++i) {
-        int face_vertices = obj->face_vertices[i];
-        indices_reserved += face_vertices;
+    model.materials.reserve(obj->material_count);
+
+    for(size_t i=0;i<obj->material_count;i++){
+        const fastObjMaterial& mat = obj->materials[i];
+        Material tmpMaterial{};
+        tmpMaterial.ambient = {mat.Ka[0],mat.Ka[1],mat.Ka[2]};
+        tmpMaterial.diffuse = {mat.Kd[0],mat.Kd[1],mat.Kd[2]};
+        tmpMaterial.emmission = {mat.Ke[0],mat.Ke[1],mat.Ke[2]};
+        tmpMaterial.specular = {mat.Ks[0],mat.Ks[1],mat.Ks[2]};
+        tmpMaterial.opacity = mat.d;
+        tmpMaterial.indexOfRefraction = mat.Ni;
+        tmpMaterial.shininess = mat.Ns;
+
+        tmpMaterial.diffuseMap.path = mat.map_Kd;
+        tmpMaterial.normalMap.path = mat.map_bump;
+        tmpMaterial.opacityMap.path = mat.map_d;
+
+        model.materials.push_back(tmpMaterial);
     }
-    vertices.reserve(allocator, 0, indices_reserved); // May need resizing
-    indices.reserve(allocator, 0, indices_reserved);
 
-    size_t vertexOffset = 0;
-    size_t indexOffset = 0;
+    for(size_t i=0;i<obj->group_count;i++){
+        const fastObjGroup& group = obj->groups[i];
+        if(group.face_count == 0) continue;
 
-    std::unordered_map<Vertex, uint32_t, VertexHash> uniqueVertices;
+        Mesh mesh{};
+        mesh.materialID = obj->face_materials[group.face_offset];
+        std::unordered_map<Vertex, uint32_t, VertexHash> uniqueVerts;
 
-    // Vertex : Vec3 pos & Vec3 color
-    for(unsigned int i=0;i<obj->face_count; i++){
-        for(unsigned int j=0;j<obj->face_vertices[i]-2;j++){
-            fastObjIndex indexX = obj->indices[indexOffset];
-            fastObjIndex indexY = obj->indices[indexOffset+j+1];
-            fastObjIndex indexZ = obj->indices[indexOffset+j+2];
+        uint32_t offsetIndex = 0;
+        for(size_t j=0;j<group.face_count;j++){
+            size_t faceVerts = obj->face_vertices[group.face_offset+j];
+            for(size_t k=0;k<faceVerts;k++){
+                fastObjIndex idx = obj->indices[offsetIndex+k];
+                Vertex vert{};
+                vert.pos = {
+                    obj->positions[3*idx.p+0],
+                    obj->positions[3*idx.p+1],
+                    obj->positions[3*idx.p+2],
+                };
+                if(idx.t >= 0)
+                    vert.texCoord = {
+                        obj->texcoords[2*idx.t+0],
+                        obj->texcoords[2*idx.t+1]
+                    };
+                if(idx.n >=0)
+                    vert.normal = {
+                        obj->normals[3*idx.n+0],
+                        obj->normals[3*idx.n+1],
+                        obj->normals[3*idx.n+2],
+                    };
 
-            fastObjIndex triIdx[3] = {indexX,indexY,indexZ};
+                if(uniqueVerts.count(vert) == 0){
+                    uniqueVerts[vert] = static_cast<uint32_t>(mesh.vertices.size());
 
-            for(unsigned k=0;k<3;k++){
-                float px = obj->positions[3*triIdx[k].p+0];
-                float py = obj->positions[3*triIdx[k].p+1];
-                float pz = obj->positions[3*triIdx[k].p+2];
-
-                glm::vec3 pos = {px,py,pz};
-                glm::vec3 color = {1.0f,1.0f,0.0f};
-                glm::vec2 texCoord = {0.0f,0.0f};
-
-                if(triIdx[k].t >= 0){
-                    float u = obj->texcoords[2*triIdx[k].t+0];
-                    float v = obj->texcoords[2*triIdx[k].t+1];
-                    texCoord = {u,v};
+                    mesh.vertices.push_back(vert);
                 }
-
-                Vertex vert = {pos,color,texCoord};
-
-                if(!uniqueVertices.contains(vert)){
-                    uint32_t idx = static_cast<uint32_t>(vertices.size());
-                    uniqueVertices[vert] = idx;
-                    vertices.push(allocator, vert);
-                }
-
-                indices.push(allocator, uniqueVertices[vert]);
+                mesh.indices.push_back(uniqueVerts[vert]);
             }
+            offsetIndex += faceVerts;
         }
-        indexOffset += obj->face_vertices[i];
+        model.meshes.push_back(mesh);
     }
 
     fast_obj_destroy(obj);

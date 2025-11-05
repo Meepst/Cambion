@@ -1,5 +1,7 @@
 #include "arena.h"
 #include "common.h"
+#include "containers.h"
+#include "primitives.h"
 #include "resources.h"
 #include "device.h"
 #include "swapchain.h"
@@ -309,47 +311,68 @@ int main(int argc, char *argv[]){
 
 
 
-    VkSemaphore renderFinishedSemaphores[MAX_FRAMES_IN_FLIGHT];
+    DynArray<VkSemaphore> renderFinishedSemaphores;
     VkSemaphore imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkFence inFlightFences[MAX_FRAMES_IN_FLIGHT];
 
     for(int i=0; i<MAX_FRAMES_IN_FLIGHT; i++){
         imageAvailableSemaphores[i] = createSemaphore(device);
-        renderFinishedSemaphores[i] = createSemaphore(device);
         inFlightFences[i] = createFence(device);
     }
 
+    renderFinishedSemaphores.resize(arena, swapchain.imageCount);
+    for(int i=0;i<swapchain.imageCount;i++){
+        renderFinishedSemaphores[i] = createSemaphore(device);
+    }
+
    // TODO: make scene or model header
-    DynArray<Vertex> vertices;
-    DynArray<uint32_t> indices;
-    assert(loadModel(arena, vertices, indices, "assets/sponza/sponza.obj"));
+    std::vector<Mesh> refMeshes;
+    std::vector<Material> refMaterial;
+    Model model(refMeshes,refMaterial);
+    assert(loadModel(arena, model, "assets/viking_house/viking.obj"));
+    std::cout << model.meshes[3].materialID << std::endl;
 
-    // std::vector<Vertex> vertices;
-    // std::vector<uint32_t> indices;
-    // assert(loadModelEvil(vertices, indices, "assets/crocodile/crocodile.obj"));
+    VkDeviceSize totalVertSize = 0;
+    VkDeviceSize totalIndexSize = 0;
 
-    // TODO: figure out how to upload data
+    for(size_t i = 0; i<model.meshes.size();i++){
+        totalVertSize += sizeof(Vertex)*model.meshes[i].vertices.size();
+        totalIndexSize += sizeof(uint32_t)*model.meshes[i].indices.size();
+    }
+
     Buffer vertexBuffer{};
-    createBuffer(vertexBuffer, device, memoryProperties, vertices.size()*sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+    createBuffer(vertexBuffer, device, memoryProperties, totalVertSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    memcpy(vertexBuffer.data, vertices.data(), sizeof(Vertex)*vertices.size());
-    vkUnmapMemory(device, vertexBuffer.memory);
 
     Buffer indexBuffer{};
-    createBuffer(indexBuffer, device, memoryProperties, indices.size()*sizeof(uint32_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+    createBuffer(indexBuffer, device, memoryProperties, totalIndexSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-    memcpy(indexBuffer.data, indices.data(), sizeof(uint32_t)*indices.size());
+    VkDeviceSize vertexOffset = 0;
+    VkDeviceSize indexOffset = 0;
+
+    DynArray<VkDeviceSize> vertexOffsets;
+    DynArray<VkDeviceSize> indexOffsets;
+    for(uint32_t i=0; i<model.meshes.size();i++){
+        vertexOffsets.push(arena,vertexOffset);
+        indexOffsets.push(arena,indexOffset);
+
+        memcpy((uint8_t*)vertexBuffer.data+vertexOffset,model.meshes[i].vertices.data(),model.meshes[i].vertices.size()*sizeof(Vertex));
+        memcpy((uint8_t*)indexBuffer.data+indexOffset,model.meshes[i].indices.data(),model.meshes[i].indices.size()*sizeof(uint32_t));
+
+        vertexOffset += sizeof(Vertex)*model.meshes[i].vertices.size();
+        indexOffset += sizeof(uint32_t)*model.meshes[i].indices.size();
+    }
+
+    vkUnmapMemory(device, vertexBuffer.memory);
     vkUnmapMemory(device, indexBuffer.memory);
 
     UniformBufferObject ubo{};
-    ubo.model = glm::scale(glm::mat4(1.0f),glm::vec3(0.02f));
-    ubo.model = glm::translate(ubo.model, glm::vec3(15.0f,16.0f,-10.0f));
-    ubo.view = glm::lookAt(glm::vec3(0.0f,0.0f,5.0f),glm::vec3(0.0f,0.0f,0.0f),
-        glm::vec3(0.0f,1.0f,0.0f));
-    ubo.proj = glm::perspective(glm::radians(45.0f),swapchain.width/(float)
-        swapchain.height,0.1f,10.0f);
+    ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.proj = glm::perspective(glm::radians(45.0f), swapchain.width / (float)swapchain.height, 0.1f, 10.0f);
     ubo.proj[1][1] *= -1;
 
     Buffer uniformBuffer{};
@@ -360,44 +383,20 @@ int main(int argc, char *argv[]){
     vkUnmapMemory(device, uniformBuffer.memory);
 
 
-    printf("Number of vertices: %u Number of Indices: %u\n", vertices.size(),indices.size());
     VkClearColorValue clearColor = {0.3f,0.6f,0.6f,1.0f};
 
     VkCommandPool initCommandPool = createCommandPool(device, familyIndex);
 
-    printf("gulp! \n");
-    Image textureImage;
-    const char* texturePath = "assets/crocodile/crocodile_diff.jpg";
-    uint32_t texMipLevels = 0;
-    loadTexture(textureImage, device, physicalDevice, initCommandPool, graphicsQueue, texturePath, texMipLevels);
-    printf("wow! \n");
-    // std::pair<VkDescriptorPool, VkDescriptorSet> textureSet = createDescriptorArray(device, mainProgram.setLayout, 1);
-
-    vkDestroyCommandPool(device, initCommandPool, 0);
-
-    initCommandPool = createCommandPool(device, familyIndex);
-
     VkCommandBuffer initCommandBuffer = 0;
     createCommandBuffer(device, initCommandPool, initCommandBuffer);
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(initCommandBuffer, &beginInfo);
 
-    transitionImageLayout(device, initCommandBuffer, graphicsQueue,
-        depthImage.image, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-        1);
+    Image textureImage;
+    const char* texturePath = "assets/viking_house/viking_room.png";
+    uint32_t texMipLevels = 0;
+    loadTexture(textureImage, device, physicalDevice, initCommandPool, graphicsQueue, texturePath, texMipLevels);
 
-    vkEndCommandBuffer(initCommandBuffer);
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &initCommandBuffer;
-
-    vkQueueSubmit(graphicsQueue, 1, &submitInfo,0);
-    vkQueueWaitIdle(graphicsQueue);
-    vkFreeCommandBuffers(device, initCommandPool, 1, &initCommandBuffer);
     vkDestroyCommandPool(device, initCommandPool, 0);
+
 
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(physicalDevice, &properties);
@@ -458,6 +457,9 @@ int main(int argc, char *argv[]){
                     vkDestroyImageView(device,swapchainImageViews[i],0);
                 swapchainImageViews[i] = createImageView(device,swapchain.images[i],swapchainFormat,0,1);
             }
+            destroyImage(depthImage,device);
+            createImage(depthImage,device, memoryProperties,swapchain.width,swapchain.height,1,
+                depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
         }
 
 
@@ -479,6 +481,11 @@ int main(int argc, char *argv[]){
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
         VK_CHECK(vkBeginCommandBuffer(commandBuffers[currentFrame],&beginInfo));
+        // should move this to an indepent swapchain recreate buffer sequence/area
+        transitionImageLayout(device, commandBuffers[currentFrame], graphicsQueue,
+            depthImage.image, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            1);
+
 
         transitionImageLayout(device,commandBuffers[currentFrame],graphicsQueue,
             swapchain.images[imageIndex],swapchainFormat,VK_IMAGE_LAYOUT_UNDEFINED,
@@ -515,7 +522,6 @@ int main(int argc, char *argv[]){
         vkCmdBeginRendering(commandBuffers[currentFrame], &passInfo);
         vkCmdBindPipeline(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,graphicsPipeline);
 
-        vkCmdPushConstants(commandBuffers[currentFrame],mainProgram.layout,VK_SHADER_STAGE_VERTEX_BIT,0,sizeof(ubo),&ubo);
         vkCmdBindDescriptorSets(commandBuffers[currentFrame],VK_PIPELINE_BIND_POINT_GRAPHICS,
             mainProgram.layout,0,1,&descSet,0,nullptr);
 
@@ -532,15 +538,22 @@ int main(int argc, char *argv[]){
            //mainProgram.layout,0,1,&textureSet.second,0,nullptr);
 
         VkBuffer vertexBuffers[] = {vertexBuffer.buffer};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(commandBuffers[currentFrame],0,1,vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(commandBuffers[currentFrame], indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(commandBuffers[currentFrame],static_cast<uint32_t>(indices.size()), 1,0,0,0);
+        for(size_t i=0;i<model.meshes.size();i++){
 
+            vkCmdPushConstants(commandBuffers[currentFrame],mainProgram.layout,VK_SHADER_STAGE_VERTEX_BIT,0,sizeof(ubo),&ubo);
+            auto& mesh = model.meshes[i];
+
+            VkDeviceSize vertexOffset = vertexOffsets[i];
+            VkDeviceSize indexOffset = indexOffsets[i];
+
+            vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, &vertexOffset);
+            vkCmdBindIndexBuffer(commandBuffers[currentFrame],indexBuffer.buffer,indexOffset,VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(commandBuffers[currentFrame],mesh.indices.size(),1,0,0,0);
+        }
         vkCmdEndRendering(commandBuffers[currentFrame]);
 
         transitionImageLayout(device, commandBuffers[currentFrame], graphicsQueue,
-            swapchain.images[currentFrame], swapchainFormat, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            swapchain.images[imageIndex], swapchainFormat, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 1);
 
         vkEndCommandBuffer(commandBuffers[currentFrame]);
@@ -559,7 +572,7 @@ int main(int argc, char *argv[]){
 
         VkSemaphoreSubmitInfo signalSemaphoreInfo{};
         signalSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-        signalSemaphoreInfo.semaphore = renderFinishedSemaphores[currentFrame];
+        signalSemaphoreInfo.semaphore = renderFinishedSemaphores[imageIndex];
         signalSemaphoreInfo.value = 0;
         signalSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
         signalSemaphoreInfo.deviceIndex = 0;
@@ -579,7 +592,7 @@ int main(int argc, char *argv[]){
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
         presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = &renderFinishedSemaphores[currentFrame];
+        presentInfo.pWaitSemaphores = &renderFinishedSemaphores[imageIndex];
 
         VkSwapchainKHR swapchains[] = {swapchain.swapchain};
         presentInfo.swapchainCount = 1;
@@ -596,6 +609,7 @@ int main(int argc, char *argv[]){
 
     vkDeviceWaitIdle(device);
     vkDestroySampler(device, textureSampler, nullptr);
+
     destroyBuffer(indexBuffer, device);
     destroyBuffer(vertexBuffer, device);
     destroyBuffer(uniformBuffer, device);
@@ -610,9 +624,10 @@ int main(int argc, char *argv[]){
 
     for(int i=0;i<MAX_FRAMES_IN_FLIGHT;i++){
         vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
-        vkDestroySemaphore(device, renderFinishedSemaphores[i],nullptr);
         vkDestroyFence(device, inFlightFences[i], nullptr);
     }
+    for(int i=0;i<swapchain.imageCount;i++)
+        vkDestroySemaphore(device,renderFinishedSemaphores[i],nullptr);
 
     destroyImage(textureImage, device);
 

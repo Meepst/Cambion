@@ -1,11 +1,12 @@
 #pragma once
 
 #include "common.h"
+#include "resources.h"
 
 
 struct Vertex{
     glm::vec3 pos;
-    glm::vec3 color;
+    glm::vec3 normal;
     glm::vec2 texCoord;
 
     static VkVertexInputBindingDescription getBindingDescription(){
@@ -26,7 +27,7 @@ struct Vertex{
         attributeDescriptions[1].binding = 0;
         attributeDescriptions[1].location = 1;
         attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[1].offset = offsetof(Vertex, color);
+        attributeDescriptions[1].offset = offsetof(Vertex, normal);
 
         attributeDescriptions[2].binding = 0;
         attributeDescriptions[2].location = 2;
@@ -36,7 +37,7 @@ struct Vertex{
         return attributeDescriptions;
     }
     bool operator==(const Vertex& other) const {
-        return pos == other.pos && color == other.color && texCoord == other.texCoord;
+        return pos == other.pos && normal == other.normal && texCoord == other.texCoord;
     }
 };
 
@@ -46,9 +47,9 @@ struct VertexHash{
         auto h2 = std::hash<float>{}(ver.pos.y);
         auto h3 = std::hash<float>{}(ver.pos.z);
 
-        auto h4 = std::hash<float>{}(ver.color.x);
-        auto h5 = std::hash<float>{}(ver.color.y);
-        auto h6 = std::hash<float>{}(ver.color.z);
+        auto h4 = std::hash<float>{}(ver.normal.x);
+        auto h5 = std::hash<float>{}(ver.normal.y);
+        auto h6 = std::hash<float>{}(ver.normal.z);
 
         auto h7 = std::hash<float>{}(ver.texCoord.x);
         auto h8 = std::hash<float>{}(ver.texCoord.y);
@@ -78,13 +79,21 @@ struct Mesh {
 };
 
 struct TextureImage{
-    VkImage image;
-    VkImageView imageView;
+    std::string path;
+    Image image;
     VkSampler sampler;
 };
 
 struct Material{
     glm::vec3 ambient, diffuse, specular, emmission;
     float shininess, indexOfRefraction, opacity;
-    std::string diffuseMap, normalMap, opacityMap;
+    TextureImage diffuseMap, normalMap, opacityMap;
+};
+
+struct Model{
+  std::vector<Mesh> meshes;
+  std::vector<Material> materials;
+
+  Model(std::vector<Mesh> meshes, std::vector<Material> materials) :
+    meshes(meshes), materials(materials){}
 };
