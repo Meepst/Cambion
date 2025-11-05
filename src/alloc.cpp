@@ -22,7 +22,7 @@ CambionInternal uint64_t initialize() {
 CambionInternal const uint64_t PAGE_SIZE = initialize();
 
 
-VirtualMemoryBlock osAlloc(size_t minimum_bytes, uint64_t flags) {
+VirtualMemoryBlock osAlloc(uint64_t minimum_bytes, uint64_t flags) {
     assert(minimum_bytes > 0);
 
     void* memory;

@@ -2,89 +2,95 @@
 
 #include "alloc.h"
 
-#include <algorithm>
+#include <stdio.h>
 
 
 template <typename T>
 class DynArray {
     public:
-        T* _data = nullptr;
-        uint64_t _size = 0;
-        uint64_t _capacity = 0;
+        T* pdata = nullptr;
+        uint64_t count = 0;
+        uint64_t capacity = 0;
 
         DynArray() {}
         DynArray(Allocator& allocator, uint64_t num_elements, uint64_t capacity = 0):
-                _size(num_elements) {
+                count(num_elements) {
             assert(capacity == 0 || num_elements <= capacity);
 
             if (capacity == 0) capacity = num_elements;
-            _data = (T*)alloc(allocator, capacity * sizeof(T), alignof(T));
-            _capacity = capacity;
+            pdata = (T*)alloc(allocator, capacity * sizeof(T), alignof(T));
+            capacity = capacity;
         }
 
         void dealloc(Allocator& allocator) {
-            allocator.dealloc(allocator, _capacity * sizeof(T), _data);
+        #ifdef _DEBUG
+            if (pdata == nullptr) {
+                printf("Attempted to delete empty DynArray\n");
+                return;
+            }
+        #endif
+            allocator.dealloc(allocator, capacity * sizeof(T), pdata);
         }
 
         T& operator[](uint64_t i) {
-            assert(_data != nullptr && i < _size);
-            return _data[i];
+            assert(pdata != nullptr && i < count);
+            return pdata[i];
         }
 
         void push(Allocator& allocator, T value) {
-            if (_size >= _capacity) {
+            if (count >= capacity) {
                 // capacity + capacity / 4 + 16 (minimum), rounded up to mult of 8
-                uint64_t new_capacity = alignPow2(_capacity + (_capacity >> 2) + 16, 8);
+                uint64_t new_capacity = alignPow2(capacity + (capacity >> 2) + 16, 8);
                 void* memory = allocator.alloc(allocator, new_capacity * sizeof(T), alignof(T));
-                memcpy(memory, _data, _size * sizeof(T));
+                memcpy(memory, pdata, count * sizeof(T));
 
-                allocator.dealloc(allocator, _capacity * sizeof(T), _data);
+                allocator.dealloc(allocator, capacity * sizeof(T), pdata);
 
-                _data = (T*)memory;
-                _data[_size] = value;
-                _size += 1;
-                _capacity = new_capacity;
+                pdata = (T*)memory;
+                pdata[count] = value;
+                count += 1;
+                capacity = new_capacity;
 
                 return;
             }
 
-            _data[_size] = value;
-            _size += 1;
+            pdata[count] = value;
+            count += 1;
         }
         T pop() {
-            assert(_size > 0);
+            assert(count > 0);
 
-            _size -= 1;
-            return _data[_size];
+            count -= 1;
+            return pdata[count];
         }
 
 
         constexpr T* data() noexcept {
-            assert(_data != nullptr);
-            return _data;
+            assert(pdata != nullptr);
+            return pdata;
         }
         constexpr uint64_t size() noexcept {
-            assert(_data != nullptr);
-            return _size;
+            assert(pdata != nullptr);
+            return count;
         }
         constexpr T& front() noexcept {
-            assert(_data != nullptr);
-            return _data[0];
+            assert(pdata != nullptr);
+            return pdata[0];
         }
         constexpr T& back() noexcept {
-            assert(_data != nullptr);
-            return _data[_size-1];
+            assert(pdata != nullptr);
+            return pdata[count-1];
         }
 
         // Reserve memory if no data was initialized
         void reserve(Allocator& allocator, uint64_t num_elements, uint64_t capacity = 0) {
-            assert(_data == nullptr && (capacity == 0 || num_elements <= capacity));
+            assert(pdata == nullptr && (capacity == 0 || num_elements <= capacity));
 
             if (capacity == 0) capacity = num_elements;
 
-            _data = (T*)allocator.alloc(allocator, std::max(capacity, num_elements) * sizeof(T), alignof(T));
-            _size = num_elements;
-            _capacity = capacity;
+            pdata = (T*)allocator.alloc(allocator, capacity * sizeof(T), alignof(T));
+            count = num_elements;
+            this->capacity = capacity;
         }
         // If num_elements is less than current size, the elements at the end are discarded, and only num_elements of
         // the original data is copied
@@ -93,48 +99,54 @@ class DynArray {
 
             if (capacity == 0) capacity = num_elements;
 
-            void* memory = allocator.alloc(allocator, std::max(capacity, num_elements) * sizeof(T), alignof(T));
-            if (_data != nullptr) {
-                memcpy(memory, _data, std::min(_size, num_elements) * sizeof(T));
-                allocator.dealloc(allocator, _capacity * sizeof(T), _data);
+            void* memory = allocator.alloc(allocator, capacity * sizeof(T), alignof(T));
+            if (pdata != nullptr) {
+                memcpy(memory, pdata, (count <= num_elements ? count : num_elements) * sizeof(T));
+                allocator.dealloc(allocator, capacity * sizeof(T), pdata);
             }
 
-            _data = (T*)memory;
-            _size = num_elements;
-            _capacity = capacity;
+            pdata = (T*)memory;
+            count = num_elements;
+            this->capacity = capacity;
         }
 };
 
 template <typename T>
 void dealloc(Allocator& allocator, DynArray<T>& array) {
-    allocator.dealloc(allocator, array._capacity * sizeof(T), array.data);
+#ifdef _DEBUG
+    if (array.pdata == nullptr) {
+        printf("Attempted to delete empty DynArray\n");
+        return;
+    }
+#endif
+    allocator.dealloc(allocator, array.capacity * sizeof(T), array.data);
 }
 
 template <typename T>
 void push(Allocator& allocator, DynArray<T>& array, T value) {
-    if (array._size >= array._capacity) {
-        uint64_t new_capacity = alignPow2(array._capacity + (array._capacity >> 2) + 16, 8); // capacity + capacity / 4 + 16 (minimum)
+    if (array.count >= array.capacity) {
+        uint64_t new_capacity = alignPow2(array.capacity + (array.capacity >> 2) + 16, 8); // capacity + capacity / 4 + 16 (minimum)
         void* memory = allocator.alloc(allocator, new_capacity * sizeof(T), alignof(T));
-        memcpy(memory, array._data, array._size * sizeof(T));
+        memcpy(memory, array.pdata, array.count * sizeof(T));
 
-        allocator.dealloc(allocator, array._capacity * sizeof(T), array._data);
+        allocator.dealloc(allocator, array.capacity * sizeof(T), array.pdata);
 
-        array._data = memory;
-        array._data[array._size] = value;
-        array._size += 1;
-        array._capacity = new_capacity;
+        array.pdata = memory;
+        array.pdata[array.count] = value;
+        array.count += 1;
+        array.capacity = new_capacity;
 
         return;
     }
 
-    array._data[array._size] = value;
-    array._size += 1;
+    array.pdata[array.count] = value;
+    array.count += 1;
 }
 
 template <typename T>
 T pop(DynArray<T>& array) {
-    assert(array._size > 0);
+    assert(array.count > 0);
 
-    array._size -= 1;
-    return array[array._size];
+    array.count -= 1;
+    return array[array.count];
 }
