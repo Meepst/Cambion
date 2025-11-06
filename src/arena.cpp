@@ -63,7 +63,7 @@ void arenaFree(Allocator& allocator) {
     assert(allocator.alloc == arenaAlloc && allocator.data != nullptr);
 
     Arena* arena = (Arena*)allocator.data; // os memory to free begins at allocator data
-    osFree(arena, arena->size);
+    osFree(arena, ALLOCATOR_RESERVED_SIZE + arena->size);
 
     allocator.alloc = nullptr;
     allocator.dealloc = nullptr;
