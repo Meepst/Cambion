@@ -42,9 +42,10 @@ class DynArray {
                 // capacity + capacity / 4 + 16 (minimum), rounded up to mult of 8
                 uint64_t new_capacity = alignPow2(capacity + (capacity >> 2) + 16, 8);
                 void* memory = allocator.alloc(allocator, new_capacity * sizeof(T), alignof(T));
-                memcpy(memory, pdata, count * sizeof(T));
-
-                allocator.dealloc(allocator, capacity * sizeof(T), pdata);
+                if (pdata != nullptr) {
+                    memcpy(memory, pdata, count * sizeof(T));
+                    allocator.dealloc(allocator, capacity * sizeof(T), pdata);
+                }
 
                 pdata = (T*)memory;
                 pdata[count] = value;
