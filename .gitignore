@@ -1,6 +1,2 @@
-# zig builds
-/.zig-cache
-/zig-out
-
 # cmake builds
 /build
